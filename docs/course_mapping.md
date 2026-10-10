@@ -18,8 +18,8 @@ the "Where used" column stays correct.
 | 9 | RAG with Pinecone | Pinecone insert (01, 02) and `retrieve-as-tool` (03) |
 | 10 | Structured output | Structured Output Parser with `prompts/ticket_schema.json` (04) |
 | 11 | JSON schemas / output parsers | Enum fields (`issue_type`, `sentiment`, `priority`) that map to `tickets` columns |
-| 12 | AI Agents & tools | Tools Agent with 4 tools (03) |
-| 13 | Sub-workflows / multi-agent building blocks | `escalate_to_human` = Call n8n Workflow tool → workflow 04 (Execute Workflow Trigger) |
+| 12 | AI Agents & tools | Support agent with 5 tools (03); Inventory Agent with 2 tools (06) |
+| 13 | Multi-agent systems / sub-workflows | **Two domain-expert agents**: support agent (03) delegates to the Inventory Agent (06) via the `inventory_expert` tool; `escalate_to_human` → workflow 04 |
 | 14 | Agentic RAG | Agent chooses which knowledge base to search, or both, per question |
 | 15 | Multiple knowledge bases | `faq_knowledge` (PDF) vs `website_knowledge` (scraped pages) in one index |
 | 16 | E-mail automation (SMTP) | `Email Support Team (SMTP)` – Gmail SMTP (04) |
@@ -30,7 +30,7 @@ the "Where used" column stays correct.
 | 21 | Slack API & human-in-the-loop | Slack alert to `#support-escalations` (04) |
 | 22 | Twilio SMS | SMS to customer on escalation (04) and on delayed orders (05) |
 | 23 | Web scraping & summarization | HTTP Request → HTML Extract → LLM summary (02) |
-| 24 | Capstone: end-to-end agent | Whole project, testing (`docs/test_questions.md`), report (`docs/report.md`) |
+| 24 | Capstone: end-to-end agent | Whole project; web app with live dashboard (`app/`); automatic evaluation (`scripts/evaluate.py`); KPI report (`scripts/kpi_report.py`); report (`docs/report.md`) |
 
 ## Capstone line coverage
 

@@ -143,7 +143,7 @@ elif st != 200:
 else:
     names = {}
     for w in wfs.get("data", []):
-        if w["name"][:3] not in ("01 ", "02 ", "03 ", "04 ", "05 "):
+        if w["name"][:3] not in ("01 ", "02 ", "03 ", "04 ", "05 ", "06 "):
             continue
         names[w["id"]] = w["name"]
         types = {n["type"].split(".")[-1] for n in w["nodes"]}

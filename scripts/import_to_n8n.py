@@ -6,14 +6,14 @@ Run this ON YOUR OWN COMPUTER (where n8n runs), from the repo folder:
     python3 scripts/import_to_n8n.py     # reads N8N_URL / N8N_API_KEY / OLLAMA_URL from .env
 
 What it does:
-  1. workflow 04 (escalation) first, then 03, 01, 02, 05;
+  1. workflow 04 (escalation) and 06 (inventory agent) first, then 03, 01, 02, 05;
   2. if a workflow with the same name already exists it is UPDATED in place (same ID, same URL)
      and every node keeps the credential you already selected (matched by node name);
      otherwise it is created;
   3. creates the Ollama credential (and placeholder Slack/Twilio/SMTP credentials so 04/05 can be
      published) if they do not exist; nodes with no credential get your credential of the right
      type if you have exactly one of it;
-  4. puts workflow 04's ID into the `escalate_to_human` tool of workflow 03.
+  4. points the tools of workflow 03 at the real IDs: escalate_to_human -> 04, inventory_expert -> 06.
 Nothing is published/activated. Nodes that never had a credential show a warning: open them and
 select your credential. Only the Python 3 standard library is used - no pip install needed.
 """
@@ -25,8 +25,10 @@ import urllib.request
 from pathlib import Path
 
 WF_DIR = Path(__file__).resolve().parent.parent / "workflows"
-ORDER = ["04_escalation_subworkflow.json", "03_support_agent_chat.json",
+ORDER = ["04_escalation_subworkflow.json", "06_inventory_agent.json", "03_support_agent_chat.json",
          "01_ingest_faq_pdf.json", "02_scrape_and_summarize.json", "05_order_update_webhook.json"]
+# Agent tools in 03 that call another workflow: tool node name -> workflow file it must point to.
+LINKS = {"escalate_to_human": "04_escalation_subworkflow.json", "inventory_expert": "06_inventory_agent.json"}
 
 # Read .env from the repo folder (no `source .env` needed; values with spaces are fine).
 _env = Path(__file__).resolve().parent.parent / ".env"
@@ -136,7 +138,7 @@ for t, cs in by_type.items():
     if len(cs) > 1:
         print(f"note: {len(cs)} credentials of type {t} exist - not auto-assigning; keep only one or pick in the UI.")
 
-escalation_id = None
+ids = {}  # workflow file -> id in n8n
 for filename in ORDER:
     wf = json.loads((WF_DIR / filename).read_text(encoding="utf-8"))
     old = existing.get(wf["name"])
@@ -148,10 +150,9 @@ for filename in ORDER:
         elif NEEDS.get(node["type"].split(".")[-1]) in auto:
             ctype = NEEDS[node["type"].split(".")[-1]]
             node["credentials"] = {ctype: auto[ctype]}  # your only credential of this type
-        if node["name"] == "escalate_to_human" and escalation_id:
-            node["parameters"]["workflowId"] = {
-                "__rl": True, "value": escalation_id, "mode": "list",
-                "cachedResultName": "04 Escalation Sub-workflow (Ticket + Slack + SMS + Email)"}
+        target = LINKS.get(node["name"])
+        if target and target in ids:
+            node["parameters"]["workflowId"] = {"__rl": True, "value": ids[target], "mode": "id"}
     body = {k: wf[k] for k in ("name", "nodes", "connections", "settings")}
     try:
         if old:
@@ -161,11 +162,10 @@ for filename in ORDER:
     except ApiError as e:
         # e.g. a PUBLISHED workflow whose node still has no credential: n8n refuses to re-publish.
         print(f"SKIPPED  {wf['name']}: {e}\n         -> open it in n8n, select the missing credential, then run this again.")
-        if filename.startswith("04") and old:
-            escalation_id = old["id"]
+        if old:
+            ids[filename] = old["id"]
         continue
-    if filename.startswith("04"):
-        escalation_id = result["id"]
+    ids[filename] = result["id"]
     print(f"{action:8} {result['id']}  {result['name']}")
 
 print(f"\nDone. Open {base}/home/workflows. Check credentials on nodes with a warning, then Save/Publish.")

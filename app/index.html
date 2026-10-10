@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShopAssist – UrbanThread</title>
+<style>
+  :root { --bg:#f6f5f2; --card:#fff; --ink:#1f2328; --muted:#6b7280; --line:#e5e3dd; --accent:#b4532a;
+          --ok:#1a7f37; --warn:#b45309; --bad:#c62828; --bot:#f1efe9; --me:#b4532a; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#151515; --card:#1f1f1f; --ink:#ececec; --muted:#9a9a9a;
+          --line:#333; --bot:#2a2a2a; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; align-items:center; gap:12px; padding:14px 20px; border-bottom:1px solid var(--line); background:var(--card); }
+  header h1 { font-size:18px; margin:0; } header small { color:var(--muted); }
+  .dots { margin-left:auto; display:flex; gap:12px; font-size:13px; color:var(--muted); }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:#aaa; margin-right:4px; }
+  main { display:grid; grid-template-columns: minmax(320px, 1fr) minmax(320px, 1.1fr); gap:16px; padding:16px; max-width:1300px; margin:auto; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; }
+  #chat { display:flex; flex-direction:column; height:calc(100vh - 110px); min-height:480px; }
+  #log { flex:1; overflow:auto; display:flex; flex-direction:column; gap:10px; padding:4px; }
+  .msg { max-width:85%; padding:9px 12px; border-radius:12px; white-space:pre-wrap; word-wrap:break-word; }
+  .bot { background:var(--bot); align-self:flex-start; } .me { background:var(--me); color:#fff; align-self:flex-end; }
+  .meta { font-size:11px; color:var(--muted); margin-top:3px; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0; }
+  .chip { border:1px solid var(--line); background:transparent; color:var(--ink); border-radius:999px; padding:4px 11px; cursor:pointer; font-size:13px; }
+  .chip:hover { border-color:var(--accent); color:var(--accent); }
+  form { display:flex; gap:8px; } input { flex:1; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:var(--ink); font-size:15px; }
+  button.send { background:var(--accent); color:#fff; border:0; border-radius:10px; padding:0 16px; font-weight:600; cursor:pointer; }
+  .kpis { display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; margin-bottom:12px; }
+  @media (max-width: 520px) { .kpis { grid-template-columns:repeat(2, 1fr); } }
+  .kpi { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 12px; }
+  .kpi b { display:block; font-size:24px; } .kpi span { font-size:12px; color:var(--muted); }
+  h3 { margin:14px 0 6px; font-size:14px; } table { width:100%; border-collapse:collapse; font-size:13px; }
+  td, th { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line); } th { color:var(--muted); font-weight:500; }
+  .low { color:var(--bad); font-weight:600; } .pending { color:var(--warn); }
+  #dash { overflow:auto; height:calc(100vh - 110px); min-height:480px; }
+  .note { font-size:12px; color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>👕 ShopAssist</h1><small>UrbanThread AI support · multi-agent · local AI</small>
+  <div class="dots"><span><i class="dot" id="d-n8n"></i>n8n</span><span><i class="dot" id="d-oll"></i>Ollama</span>
+  <span><i class="dot" id="d-db"></i>Database</span></div>
+</header>
+<main>
+  <section class="card" id="chat">
+    <div id="log"><div class="msg bot">Hi! I'm ShopAssist from UrbanThread. Ask anything, or just type one word – an order ID, “returns”, “diwali”, “stock”…</div></div>
+    <div class="chips" id="chips"></div>
+    <form id="f"><input id="q" placeholder="Type a question or one word (e.g. UT1002)" autocomplete="off"><button class="send">Send</button></form>
+  </section>
+  <section id="dash">
+    <div class="kpis">
+      <div class="kpi"><b id="k-conv">–</b><span>AI conversations</span></div>
+      <div class="kpi"><b id="k-tix">–</b><span>tickets to humans</span></div>
+      <div class="kpi"><b id="k-low">–</b><span>products low on stock</span></div>
+      <div class="kpi"><b id="k-po">–</b><span>purchase orders</span></div>
+    </div>
+    <div class="card"><h3 style="margin-top:0">Orders by status (live)</h3><table id="t-orders"></table>
+      <h3>Low stock – Inventory Agent watch list</h3><table id="t-low"></table>
+      <h3>Purchase orders (drafted by the Inventory Agent)</h3><table id="t-po"></table>
+      <h3>Latest escalation tickets</h3><table id="t-tix"></table>
+      <p class="note" id="updated">Live data from the database, refreshed every 10 s.</p></div>
+  </section>
+</main>
+<script>
+const chips = ["UT1002", "UT1003", "returns", "sizes", "delivery", "COD", "diwali", "offers", "stock", "low stock", "kurta", "human"];
+const session = "app-" + Math.random().toString(36).slice(2, 10);
+const log = document.getElementById("log"), q = document.getElementById("q");
+chips.forEach(c => { const b = document.createElement("button"); b.className = "chip"; b.textContent = c;
+  b.onclick = () => send(c); document.getElementById("chips").appendChild(b); });
+function add(text, cls, meta) { const d = document.createElement("div"); d.className = "msg " + cls; d.textContent = text;
+  if (meta) { const m = document.createElement("div"); m.className = "meta"; m.textContent = meta; d.appendChild(m); }
+  log.appendChild(d); log.scrollTop = log.scrollHeight; return d; }
+async function send(text) {
+  text = (text || "").trim(); if (!text) return; add(text, "me"); q.value = "";
+  const wait = add("…thinking (a local model can take up to a minute)", "bot");
+  try {
+    const r = await (await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: text, sessionId: session }) })).json();
+    wait.remove();
+    if (r.answer) add(r.answer, "bot", r.seconds + " s");
+    else add("⚠️ " + (r.error || "no answer") + (r.detail ? "\nn8n: " + r.detail : ""), "bot");
+  } catch (e) { wait.remove(); add("⚠️ The app server is not reachable: " + e, "bot"); }
+  refresh();
+}
+document.getElementById("f").onsubmit = e => { e.preventDefault(); send(q.value); };
+const fmt = v => typeof v === "number" ? v.toLocaleString("en-IN") : (v ?? "");
+function fill(id, rows, cols, rowClass) {
+  const t = document.getElementById(id);
+  if (!rows || rows.error) { t.innerHTML = `<tr><td class="note">${rows && rows.error ? "not available: " + rows.error : "no data"}</td></tr>`; return; }
+  if (!rows.length) { t.innerHTML = '<tr><td class="note">none yet</td></tr>'; return; }
+  t.innerHTML = "<tr>" + cols.map(c => `<th>${c[1]}</th>`).join("") + "</tr>" + rows.map(r =>
+    `<tr class="${rowClass ? rowClass(r) : ""}">` + cols.map(c => `<td>${fmt(r[c[0]])}</td>`).join("") + "</tr>").join("");
+}
+async function refresh() {
+  try {
+    const k = await (await fetch("/api/kpis")).json();
+    document.getElementById("d-db").style.background = k.error ? "var(--bad)" : "var(--ok)";
+    if (k.error) { document.getElementById("updated").textContent = "Database: " + k.error; return; }
+    const c = (k.chat_totals || [{}])[0] || {}, t = (k.ticket_totals || [{}])[0] || {};
+    document.getElementById("k-conv").textContent = c.conversations ?? 0;
+    document.getElementById("k-tix").textContent = t.tickets ?? 0;
+    document.getElementById("k-low").textContent = Array.isArray(k.low_stock) ? k.low_stock.length : "–";
+    document.getElementById("k-po").textContent = Array.isArray(k.purchase_orders) ? k.purchase_orders.length : "–";
+    fill("t-orders", k.orders_by_status, [["status", "Status"], ["orders", "Orders"], ["value_inr", "Value (Rs)"]]);
+    fill("t-low", k.low_stock, [["sku", "SKU"], ["name", "Product"], ["size", "Size"], ["stock", "Stock"], ["reorder_level", "Reorder at"]], () => "low");
+    fill("t-po", k.purchase_orders, [["po_id", "PO"], ["sku", "SKU"], ["quantity", "Qty"], ["est_cost_inr", "Est. cost (Rs)"], ["status", "Status"]],
+      r => r.status === "pending_approval" ? "pending" : "");
+    fill("t-tix", k.recent_tickets, [["ticket_id", "Ticket"], ["customer_name", "Customer"], ["order_id", "Order"], ["issue_type", "Issue"], ["priority", "Priority"]]);
+    document.getElementById("updated").textContent = "Live data from the database · updated " + new Date().toLocaleTimeString();
+  } catch (e) { document.getElementById("d-db").style.background = "var(--bad)"; }
+}
+async function status() {
+  try { const s = await (await fetch("/api/status")).json();
+    document.getElementById("d-n8n").style.background = s.n8n ? "var(--ok)" : "var(--bad)";
+    document.getElementById("d-oll").style.background = s.ollama ? "var(--ok)" : "var(--bad)"; } catch (e) {}
+}
+refresh(); status(); setInterval(refresh, 10000); setInterval(status, 30000);
+</script>
+</body>
+</html>

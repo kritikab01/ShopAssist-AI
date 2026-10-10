@@ -16,3 +16,19 @@ INSERT INTO orders (order_id, customer_name, phone, email, items, amount_inr, pa
 ('UT1009','Arjun Patel',   '+919000000009','arjun@example.com',  '1 x Graphic T-shirt (L)',                  599.00,'COD',       'cancelled',       'Ahmedabad','2026-10-02',NULL,        NULL,      NULL),
 ('UT1010','Fatima Khan',   '+919000000010','fatima@example.com', '2 x Relaxed Jeans (28), 1 x Crop Top (S)',3297.00,'UPI',       'shipped',         'Pune',     '2026-10-06','2026-10-10','Ekart',   'EK77701299')
 ON CONFLICT (order_id) DO NOTHING;
+
+-- 12 FAKE products (some deliberately low on stock so the Inventory Agent has work to do).
+INSERT INTO products (sku, name, category, size, price_inr, stock, reorder_level, supplier, supplier_phone, unit_cost_inr) VALUES
+('TSH-BAS-M', 'Basics Cotton T-shirt',   'T-shirts', 'M',  449.00, 42, 20, 'Tiruppur Knits',   '+919000000101', 180.00),
+('TSH-BAS-L', 'Basics Cotton T-shirt',   'T-shirts', 'L',  449.00,  6, 20, 'Tiruppur Knits',   '+919000000101', 180.00),
+('TSH-GRA-L', 'Graphic T-shirt',         'T-shirts', 'L',  599.00, 18, 10, 'Tiruppur Knits',   '+919000000101', 230.00),
+('KUR-LIN-S', 'Linen Kurta',             'Kurtas',   'S', 1699.00,  3, 8,  'Jaipur Handloom',  '+919000000102', 720.00),
+('KUR-LIN-M', 'Linen Kurta',             'Kurtas',   'M', 1699.00, 14, 8,  'Jaipur Handloom',  '+919000000102', 720.00),
+('JNS-SLM-32','Slim Fit Jeans',          'Jeans',    '32',1799.00, 25, 12, 'Ahmedabad Denim',  '+919000000103', 760.00),
+('JNS-RLX-28','Relaxed Jeans',           'Jeans',    '28',1499.00,  0, 10, 'Ahmedabad Denim',  '+919000000103', 640.00),
+('HOD-OVR-XL','Oversized Hoodie',        'Hoodies',  'XL',1299.00,  9, 10, 'Ludhiana Woollens','+919000000104', 520.00),
+('HOD-OVR-M', 'Oversized Hoodie',        'Hoodies',  'M', 1299.00, 30, 10, 'Ludhiana Woollens','+919000000104', 520.00),
+('JKT-DEN-M', 'Denim Jacket',            'Jackets',  'M', 2999.00, 11, 5,  'Ahmedabad Denim',  '+919000000103', 1300.00),
+('SHR-OXF-L', 'Oxford Shirt',            'Shirts',   'L', 1499.00, 22, 10, 'Bengaluru Shirts', '+919000000105', 610.00),
+('PLZ-COT-S', 'Cotton Palazzo',          'Bottoms',  'S',  799.00,  4, 8,  'Jaipur Handloom',  '+919000000102', 300.00)
+ON CONFLICT (sku) DO NOTHING;

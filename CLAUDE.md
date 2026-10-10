@@ -14,6 +14,13 @@ Capstone project: n8n customer-support agent for a fictional store (UrbanThread)
   credentials, auto-assigns the only credential of each type, creates the Ollama credential (tests
   localhost then host.docker.internal) and placeholder Slack/Twilio/SMTP credentials (n8n 2.x will not
   publish a workflow with a node lacking a credential), and links 03 -> 04.
+- Multi-agent: workflow 03 (support agent) calls workflow 06 (Inventory Agent: stock_lookup,
+  create_purchase_order on Postgres `products` / `purchase_orders`) through the `inventory_expert` tool.
+- Runbook for the user: `docs/RUNBOOK.md`. Tools: setup_database.py, import_to_n8n.py, doctor.py,
+  test_chat.py, chat_cli.py (interactive), evaluate.py (14 scored tests), kpi_report.py, app/server.py
+  (web app :8501, chat + live dashboard; posts to N8N_URL so n8n's WEBHOOK_URL port problem does not matter).
+- Known user issue: n8n in Docker `-p 5679:5678` without WEBHOOK_URL -> n8n's own chat window posts to 5678
+  ("Failed to receive response", empty Logs). Fix: WEBHOOK_URL=http://localhost:5679/ (RUNBOOK step 9).
 - `scripts/verify_setup.py` is read-only: .env, n8n credentials (self-test), Ollama, Pinecone 768, Supabase.
 - Secrets live only in `.env` (git-ignored; template `.env.example`). Never commit keys, never print
   full keys in output.
@@ -27,8 +34,5 @@ Capstone project: n8n customer-support agent for a fictional store (UrbanThread)
 - Not verifiable in the cloud sandbox: real model answer quality, real Pinecone calls.
 
 ## Next steps for the user
-1. Install Ollama, `ollama pull qwen2.5:3b`, `ollama pull nomic-embed-text`.
-2. `python3 scripts/setup_pinecone.py`, then `python3 scripts/import_to_n8n.py`.
-3. `python3 scripts/verify_setup.py` -> all checks pass.
-4. Run 01 then 02 once each; publish 04, then 03 and 05; test with docs/test_questions.md.
-5. Part B: real Slack, Twilio, Gmail SMTP credentials replace the placeholders; publish 04/05 again.
+Follow docs/RUNBOOK.md (setup_database -> import -> doctor -> run 01, 02 -> publish 04, 06, 03, 05 ->
+test_chat / chat_cli / app -> evaluate + kpi_report -> Part B real Slack/Twilio/SMTP).

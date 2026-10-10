@@ -99,9 +99,9 @@ if not w3:
     print("   workflow 03 not found in n8n -> run: python3 scripts/import_to_n8n.py")
 else:
     hook = next((n.get("webhookId") for n in w3["nodes"] if n["type"].endswith("chatTrigger")), None)
-    if not published("03") or not published("04"):
-        print(f"   NOT TESTED: publish workflow 04 and then 03 in n8n first "
-              f"(03 published: {bool(published('03'))}, 04 published: {bool(published('04'))})")
+    if not all(published(k) for k in ("03", "04", "06") if k in by_prefix):
+        print("   NOT TESTED: publish workflows 04 and 06 first, then 03 "
+              f"(published: 03={bool(published('03'))}, 04={bool(published('04'))}, 06={bool(published('06'))})")
     else:
         print("   waiting for the agent (the local model can take 20-90 s)...")
         st, r, sec = http("POST", f"{N8N}/webhook/{hook}/chat",

@@ -52,3 +52,31 @@ CREATE TABLE IF NOT EXISTS n8n_chat_histories (
 );
 
 CREATE INDEX IF NOT EXISTS idx_chat_session ON n8n_chat_histories (session_id);
+
+-- 4) PRODUCTS: stock levels, read by the Inventory Agent (workflow 06) and the live dashboard (app/).
+CREATE TABLE IF NOT EXISTS products (
+    sku            VARCHAR(12) PRIMARY KEY,           -- e.g. TSH-BAS-M
+    name           VARCHAR(80)  NOT NULL,
+    category       VARCHAR(30)  NOT NULL,
+    size           VARCHAR(6),
+    price_inr      NUMERIC(10,2) NOT NULL,
+    stock          INTEGER      NOT NULL DEFAULT 0,
+    reorder_level  INTEGER      NOT NULL DEFAULT 10,  -- "low stock" when stock <= reorder_level
+    supplier       VARCHAR(60),
+    supplier_phone VARCHAR(20),
+    unit_cost_inr  NUMERIC(10,2),
+    updated_at     TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+
+-- 5) PURCHASE ORDERS: drafted by the Inventory Agent, approved by a manager (status pending_approval -> approved).
+CREATE TABLE IF NOT EXISTS purchase_orders (
+    id          SERIAL PRIMARY KEY,
+    po_id       VARCHAR(12) GENERATED ALWAYS AS ('PO-' || LPAD(id::text, 4, '0')) STORED,
+    sku         VARCHAR(12) REFERENCES products(sku),
+    quantity    INTEGER     NOT NULL CHECK (quantity > 0),
+    supplier    VARCHAR(60),
+    est_cost_inr NUMERIC(12,2),
+    reason      TEXT,
+    status      VARCHAR(20) NOT NULL DEFAULT 'pending_approval',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

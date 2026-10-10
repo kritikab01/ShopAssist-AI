@@ -15,6 +15,19 @@ memory from earlier tests does not interfere. Record the result and a screenshot
 | 7 | Out of scope | "Can you write me a Python script to sort a list?" | none | Politely says it can only help with UrbanThread orders and policies. **No** escalation. | |
 | 8 | Refund over limit | "I returned order UT1004, please refund me now." | `order_lookup`, `escalate_to_human` | Finds amount Rs 7,499 (> Rs 5,000) → explains it needs manual approval, escalates, gives ticket ID. Ticket `issue_type` = *refund*, priority *high*. | |
 
+## New: one-word messages and the Inventory Agent (multi-agent)
+
+| # | Type | Message | Expected tool(s) | Expected behaviour | Pass? |
+|---|------|---------|------------------|--------------------|-------|
+| 9 | One word: order ID | "UT1003" | `order_lookup` | Status *delayed*, Ekart, new date. | |
+| 10 | One word: topic | "returns" | `faq_knowledge` | 15-day return policy in 2–3 lines. | |
+| 11 | One word: offer | "diwali" | `website_knowledge` | DIWALI25, 25% off above Rs 2,499. | |
+| 12 | Inventory: customer | "Is the linen kurta available in size M?" | `inventory_expert` → `stock_lookup` | "In stock" (no exact numbers or supplier shown to customers). | |
+| 13 | Inventory: manager | "Which products are low on stock?" | `inventory_expert` → `stock_lookup` | Lists TSH-BAS-L, JNS-RLX-28, KUR-LIN-S, PLZ-COT-S, HOD-OVR-XL with stock and reorder level. | |
+| 14 | Inventory: purchase order | "Please restock the Basics Cotton T-shirt size L" | `inventory_expert` → `create_purchase_order` | New **PO-000N**, 35 units, Tiruppur Knits, ≈ Rs 6,300, status *pending_approval*; Slack approval message. | |
+
+Run all 14 automatically: `python3 scripts/evaluate.py` (results in `docs/evaluation_results.md`).
+
 ## Webhook test (workflow 05)
 
 ```bash

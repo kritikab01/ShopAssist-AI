@@ -29,7 +29,13 @@ questions, and nobody is alerted when an issue is urgent.
 4. **escalates** angry customers, refunds above Rs 5,000 and unanswered questions to a human: it creates a
    structured ticket in Postgres, posts to **Slack**, sends the customer an **SMS (Twilio)** and **e-mails**
    the support team;
-5. sends an **SMS automatically when an order is delayed** (order-update webhook).
+5. sends an **SMS automatically when an order is delayed** (order-update webhook);
+6. works as a **team of two domain-expert agents**: the support agent hands stock and procurement questions
+   to an **Inventory Agent**, which checks live stock and drafts purchase orders for manager approval;
+7. understands **one-word messages** (`UT1002`, `returns`, `diwali`, `stock`) and comes with a **web app**
+   (chat + live business dashboard), a **Terminal chat**, an **automatic evaluation** and a **KPI report**.
+
+**Start here: [`docs/RUNBOOK.md`](docs/RUNBOOK.md)** – every step in order, with what you should see.
 
 ## 3. Architecture
 
@@ -54,6 +60,11 @@ flowchart LR
     SYS(["Store / courier system"]) -->|"POST order_id, status"| W05["05 Order update webhook"]
     W05 --> PG
     W05 -->|"if delayed"| TW
+    CHAT -->|"inventory_expert"| W06["06 Inventory Agent<br/>stock_lookup · create_purchase_order"]
+    W06 <--> PG
+    W06 --> SL
+    APP(["Web app :8501<br/>chat + live dashboard"]) --> CHAT
+    APP -->|"live KPIs"| PG
 ```
 
 ## 4. Repository layout
@@ -73,9 +84,10 @@ scripts/     build_workflows.py (regenerates workflows/*.json) · import_to_n8n.
 |----------|---------|--------------|
 | `01_ingest_faq_pdf.json` | Manual | Download FAQ PDF → Default Data Loader + Recursive splitter (1000/200) → Ollama embeddings (768) → Pinecone, `source=faq` |
 | `02_scrape_and_summarize.json` | Manual | Read `urls.txt` → HTTP Request each page → HTML extract → LLM summary → embeddings → Pinecone, `source=website`, `url` |
-| `03_support_agent_chat.json` | Public Chat | Tools Agent + Postgres Chat Memory + tools `faq_knowledge`, `website_knowledge`, `order_lookup`, `escalate_to_human` |
+| `03_support_agent_chat.json` | Public Chat | Tools Agent + Postgres Chat Memory + tools `faq_knowledge`, `website_knowledge`, `order_lookup`, `escalate_to_human`, `inventory_expert` (→ 06) |
 | `04_escalation_subworkflow.json` | Called by 03 | LLM + Structured Output Parser → `tickets` insert → Slack → Twilio SMS → SMTP e-mail → returns ticket ID |
 | `05_order_update_webhook.json` | Webhook POST | Update order status → if `delayed`, SMS the customer → JSON response |
+| `06_inventory_agent.json` | Called by 03 | **Second AI agent** (Inventory): tools `stock_lookup` + `create_purchase_order` (Postgres) → Slack approval request → answer back to 03 |
 
 ## 5. Accounts and credentials (all free, no credit card)
 
@@ -136,6 +148,19 @@ no API key, no rate limits, and nothing that can be blocked.
 | *Cannot publish workflow … Missing required credential* | A node has no credential | Run the import script again (creates placeholders), or select the credential in the node. |
 | Twilio *unverified number* | Trial account | Verify the phone in the Twilio console or use your own number in `seed.sql`. |
 
+## Tools you run from the Terminal
+
+| Command | What it does |
+|---------|--------------|
+| `python3 scripts/setup_database.py` | creates/updates all tables in Supabase and loads the fake data (safe to re-run) |
+| `python3 scripts/import_to_n8n.py` | creates/updates workflows 01–06 in n8n, credentials, links between agents |
+| `python3 scripts/doctor.py` | read-only diagnosis: code, `.env`, Ollama, workflows, chat port, last errors |
+| `python3 scripts/test_chat.py` | tests Ollama, the chat (03) and the webhook (05) from the Terminal |
+| `python3 scripts/chat_cli.py` | **interactive chat in the Terminal** – type anything, one word is fine |
+| `python3 app/server.py` | **web app** on http://localhost:8501 – chat + live dashboard |
+| `python3 scripts/evaluate.py` | asks 14 test questions, scores the answers → `docs/evaluation_results.md` |
+| `python3 scripts/kpi_report.py` | business KPIs from the live database → `docs/kpi_report.md` |
+
 ## 7. Demo questions
 
 1. *What is your return policy?* → FAQ answer with source
@@ -146,6 +171,10 @@ no API key, no rate limits, and nothing that can be blocked.
 6. *Third time asking! UT1003 is late, I want a manager!* → escalation, ticket ID, Slack + SMS + e-mail
 7. *Write me a Python script* → polite out-of-scope reply
 8. *Refund my order UT1004 now* (Rs 7,499) → refund over Rs 5,000 → escalation
+9. *UT1003* / *returns* / *diwali* (one word) → order status / return policy / Diwali offer
+10. *Is the linen kurta available in size M?* → handed to the **Inventory Agent** → in stock
+11. *low stock* → Inventory Agent lists products below their reorder level
+12. *Restock the Basics T-shirt size L* → Inventory Agent drafts **PO-000N** (pending manager approval)
 
 Full expected behaviour: [`docs/test_questions.md`](docs/test_questions.md).
 
@@ -157,7 +186,7 @@ Full expected behaviour: [`docs/test_questions.md`](docs/test_questions.md).
 | LLMs, prompts, chains (5–6) | System prompt, summarization chain (02), ticket chain (04) |
 | Embeddings, chunking, RAG with Pinecone (7–9) | 01, 02 insert; 03 retrieval tools |
 | Structured output / schemas (10–11) | Structured Output Parser + `ticket_schema.json` (04) |
-| AI agents, tools, sub-workflows (12–13) | Tools Agent (03); `escalate_to_human` → workflow 04 |
+| AI agents, multi-agent, sub-workflows (12–13) | Support agent (03) + **Inventory Agent (06)** as `inventory_expert` tool; `escalate_to_human` → 04 |
 | Agentic RAG, two knowledge bases (14–15) | `faq_knowledge` + `website_knowledge` |
 | SMTP e-mail, public chat (16–17) | Gmail SMTP (04); public hosted chat (03) |
 | Metadata filtering (18) | `source`, `url`, `title` metadata + filters |
