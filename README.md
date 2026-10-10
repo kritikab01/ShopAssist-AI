@@ -102,17 +102,33 @@ See `.env.example` for the full checklist. **Never commit real keys.**
 5. **n8n Cloud** – create the 6 credentials (section 5).
 6. **Import workflows (one command, self-hosted n8n)** – create an API key in n8n (*Settings → n8n API*), then on
    your computer run `N8N_URL=http://localhost:5679 N8N_API_KEY=... python3 scripts/import_to_n8n.py`.
-   It creates all 5 workflows and links 03 → 04 automatically (skip step 7). **Or manually** – in n8n: *Overview → Create workflow → ⋯ menu → Import from File*, one file at a
+   It creates all 5 workflows and links 03 → 04 automatically (skip step 7). Running it again later
+   (after `git pull`) **updates** the workflows in place and keeps the credentials you already selected.
+   **Or manually** – in n8n: *Overview → Create workflow → ⋯ menu → Import from File*, one file at a
    time, in this order: **04 → 03 → 01 → 02 → 05**. In each workflow, open every node with a warning
    triangle and select your credential.
-7. **Link 03 → 04** – open workflow 04, copy the ID from the browser URL (`/workflow/<ID>`), then in
-   workflow 03 open the `escalate_to_human` node and select workflow 04 in *Workflow* (or paste the ID).
-   Save workflow 04 (it must be saved, it does not need to be active).
+7. **Link 03 → 04** (manual import only) – in workflow 03 open the `escalate_to_human` node and select
+   workflow 04 in *Workflow*.
 8. **Edit placeholders** – Twilio *From* number in 04 and 05; *From/To e-mail* in 04.
-9. **Load knowledge** – open 01 → *Test workflow*; open 02 → *Test workflow*. Check Pinecone shows
+9. **Load knowledge** – open 01 → *Execute workflow*; open 02 → *Execute workflow*. Check Pinecone shows
    vectors (≈ 6–10 FAQ chunks + 4 page summaries). Run each only once (re-running duplicates vectors).
-10. **Go live** – activate workflow 03 (and 05). Open the Chat Trigger node → copy the **Chat URL**.
+10. **Go live** – n8n 2.x: click **Publish** on workflow **04** first, then on **03** and **05**
+    (n8n 1.x: toggle *Active*). The chat calls the *published* version of 04; if 04 is not published the
+    escalation fails with *"Workflow is not active and cannot be executed"*. After any later edit,
+    publish again. Open the Chat Trigger node → copy the **Chat URL**.
 11. **Test** – go through `docs/test_questions.md` and take screenshots for `docs/report.md`.
+
+### Troubleshooting
+
+| Error in n8n | Cause | Fix |
+|--------------|-------|-----|
+| *Mime type doesn't match selected loader* (workflow 01) | GitHub serves the PDF as `application/octet-stream` | Fixed: the **Set MIME Type to PDF** node relabels it. Re-run the import script after `git pull`. |
+| `escalate_to_human` shows *Value is not a valid alphanumeric string* | Tool v2 needs a name | Fixed: tool name `escalate_to_human` is now set. |
+| *Workflow is not active and cannot be executed* (during chat) | Workflow 04 is not published | Publish workflow 04 (step 10). |
+| *does not have access to the credential* / ⚠ on a node | Credential not selected | Open the node and select your credential. |
+| HTTP 429 from Gemini | Free-tier rate limit | Wait ~1 minute and retry; space out test questions. |
+| Pinecone *dimension mismatch* | Index not 3072 | Delete and recreate the index with dimension 3072. |
+| Twilio *unverified number* | Trial account | Verify the customer phone in the Twilio console or use your own number in `seed.sql`. |
 
 ## 7. Demo questions
 

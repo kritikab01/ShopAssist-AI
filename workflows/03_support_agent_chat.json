@@ -239,6 +239,7 @@
     },
     {
       "parameters": {
+        "name": "escalate_to_human",
         "description": "Create a support ticket and alert the human support team (Slack, SMS, e-mail). Use when the customer is angry, wants a refund above Rs 5,000, asks for a human, or the answer is not in the knowledge bases. Returns the ticket ID to give to the customer.",
         "workflowId": {
           "__rl": true,

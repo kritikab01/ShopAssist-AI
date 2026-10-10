@@ -132,27 +132,43 @@ def wf01():
         "url": f"{RAW_BASE}/data/store_faq.pdf",
         "options": {"response": {"response": {"responseFormat": "file"}}},
     })
-    pc = pinecone_insert(wf, "Insert into Pinecone (source=faq)", (460, 0))
-    emb = gemini_embeddings(wf, "Gemini Embeddings", (380, 240))
+    # GitHub serves every raw file as "application/octet-stream", but the PDF loader only
+    # accepts "application/pdf" ("Mime type doesn't match selected loader"). Fix the label.
+    mime = wf.node("Set MIME Type to PDF", "n8n-nodes-base.code", 2, (440, 0), {
+        "jsCode": (
+            "// raw.githubusercontent.com sends the PDF as application/octet-stream.\n"
+            "// The Default Data Loader (PDF) needs application/pdf, so we relabel it.\n"
+            "for (const item of $input.all()) {\n"
+            "  item.binary.data.mimeType = 'application/pdf';\n"
+            "  item.binary.data.fileExtension = 'pdf';\n"
+            "}\n"
+            "return $input.all();\n"
+        ),
+    })
+    pc = pinecone_insert(wf, "Insert into Pinecone (source=faq)", (680, 0))
+    emb = gemini_embeddings(wf, "Gemini Embeddings", (600, 240))
     loader = wf.node("Default Data Loader (PDF)", "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
-                     1.1, (580, 240), {
+                     1.1, (800, 240), {
                          "dataType": "binary",
                          "loader": "pdfLoader",
                          "textSplittingMode": "custom",
                          "options": {"metadata": metadata(("source", "faq"),
                                                           ("file", "store_faq.pdf"))},
                      })
-    split = text_splitter(wf, "Recursive Text Splitter 1000/200", (660, 440))
+    split = text_splitter(wf, "Recursive Text Splitter 1000/200", (880, 440))
     wf.sticky("Step notes",
               "- **Download FAQ PDF**: raw GitHub URL of `data/store_faq.pdf` (repo must be public). "
               "Alternative: replace with a *Google Drive → Download file* node.\n"
+              "- **Set MIME Type to PDF**: GitHub labels the file `application/octet-stream`; the PDF "
+              "loader needs `application/pdf`.\n"
               "- **Default Data Loader** reads the binary PDF and adds metadata `source=faq` – "
               "the agent's `faq_knowledge` tool filters on it.\n"
               "- **Recursive Text Splitter**: chunk size 1000, overlap 200.\n"
               "- **Gemini Embeddings**: `gemini-embedding-001`, 3072-dim vectors; index must use the same dimension and cosine.",
-              (860, -40), w=420, h=320)
+              (1080, -40), w=420, h=360)
     wf.link(t, dl)
-    wf.link(dl, pc)
+    wf.link(dl, mime)
+    wf.link(mime, pc)
     wf.link(emb, pc, "ai_embedding")
     wf.link(loader, pc, "ai_document")
     wf.link(split, loader, "ai_textSplitter")
@@ -198,7 +214,7 @@ def wf02():
             {"key": "content", "cssSelector": "body",
              "skipSelectors": "nav,header,footer,script,style"},
         ]},
-        "options": {"trimValues": True, "cleanUpText": True},
+        "options": {"trimValues": True, "cleanUpText": False},  # True glues lines together ("yourPIN")
     })
     summ = wf.node("Summarize Page (LLM)", "@n8n/n8n-nodes-langchain.chainLlm", 1.5, (1000, 0), {
         "promptType": "define",
@@ -348,6 +364,7 @@ def wf03():
         "conversation_summary": "Short summary of the conversation and the exact problem of the customer",
     }
     esc = wf.node("escalate_to_human", "@n8n/n8n-nodes-langchain.toolWorkflow", 2, (960, 300), {
+        "name": "escalate_to_human",  # required tool name in v2 (letters, numbers, underscores)
         "description": (
             "Create a support ticket and alert the human support team (Slack, SMS, e-mail). Use when the "
             "customer is angry, wants a refund above Rs 5,000, asks for a human, or the answer is not in "
