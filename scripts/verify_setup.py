@@ -21,6 +21,13 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+import socket
+
+# Some Wi-Fi networks advertise IPv6 but never answer on it; Python then waits for a timeout before
+# trying IPv4. Try IPv4 addresses first so every check stays fast on such networks.
+_getaddrinfo = socket.getaddrinfo
+socket.getaddrinfo = lambda *a, **k: sorted(_getaddrinfo(*a, **k), key=lambda r: r[0] != socket.AF_INET)
+
 ROOT = Path(__file__).resolve().parent.parent
 ENV_FILE = ROOT / ".env"
 PINECONE_DIM = 3072
@@ -173,11 +180,14 @@ if not is_set("GOOGLE_GEMINI_API_KEY"):
 else:
     gk = ENV["GOOGLE_GEMINI_API_KEY"]
     if not gk.startswith("AIza"):
-        print("       note: key does not start with 'AIza' (newer AI Studio keys may start with 'AQ.'). "
+        print("       note: key starts with something other than 'AIza' (AI Studio keys starting 'AQ.' are fine). "
               "Make sure it comes from a PERSONAL Gmail, not the School account. Testing it now (up to 1 min)...")
     G = "https://generativelanguage.googleapis.com/v1beta"
     net = can_connect("generativelanguage.googleapis.com")
     print(f"       network to Google: IPv4 {net['IPv4']}, IPv6 {net['IPv6']}")
+    if net["IPv4"] == "ok" and net["IPv6"] != "ok":
+        print("       IPv6 is broken on this network (IPv4 works). This script now uses IPv4. If n8n's Gemini calls")
+        print("       are slow or time out: System Settings -> Wi-Fi -> Details -> TCP/IP -> Configure IPv6: Link-local only")
     if net["IPv4"] != "ok" and net["IPv6"] != "ok":
         report("Gemini", False, "this Mac cannot reach generativelanguage.googleapis.com - switch Wi-Fi / phone "
                                 "hotspot, turn off VPN or firewall, then try again")
