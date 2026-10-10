@@ -19,7 +19,7 @@ RAW_BASE = "https://raw.githubusercontent.com/kritikab01/ShopAssist-AI/main"
 
 PINECONE_INDEX = "shopassist"
 # Free-tier Google Gemini (API key from aistudio.google.com, no credit card).
-CHAT_MODEL = "models/gemini-2.5-flash"
+CHAT_MODEL = "models/gemini-flash-latest"
 EMBED_MODEL = "models/gemini-embedding-001"  # 3072-dim vectors (text-embedding-004 is deprecated)
 
 # Placeholder credentials: after import, open each node and pick your own credential.
@@ -254,7 +254,7 @@ def wf02():
               "- **Read urls.txt** downloads the URL list from GitHub (one URL per line).\n"
               "- **Fetch Page HTML** runs once per URL (n8n loops over items automatically).\n"
               "- **Extract Text from HTML** keeps `<body>` text and skips nav/header/footer.\n"
-              "- **Summarize Page** = Basic LLM Chain + Gemini 2.5 Flash (temperature 0).\n"
+              "- **Summarize Page** = Basic LLM Chain + Gemini Flash (latest) (temperature 0).\n"
               "- **Default Data Loader** stores the summary with metadata `source=website`, `url`, "
               "`title` so the agent can cite the page.",
               (1880, -40), w=440, h=320)

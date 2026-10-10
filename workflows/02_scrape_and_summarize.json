@@ -130,7 +130,7 @@
     },
     {
       "parameters": {
-        "modelName": "models/gemini-2.5-flash",
+        "modelName": "models/gemini-flash-latest",
         "options": {
           "temperature": 0
         }
@@ -280,7 +280,7 @@
     },
     {
       "parameters": {
-        "content": "## Step notes\n- **Read urls.txt** downloads the URL list from GitHub (one URL per line).\n- **Fetch Page HTML** runs once per URL (n8n loops over items automatically).\n- **Extract Text from HTML** keeps `<body>` text and skips nav/header/footer.\n- **Summarize Page** = Basic LLM Chain + Gemini 2.5 Flash (temperature 0).\n- **Default Data Loader** stores the summary with metadata `source=website`, `url`, `title` so the agent can cite the page.",
+        "content": "## Step notes\n- **Read urls.txt** downloads the URL list from GitHub (one URL per line).\n- **Fetch Page HTML** runs once per URL (n8n loops over items automatically).\n- **Extract Text from HTML** keeps `<body>` text and skips nav/header/footer.\n- **Summarize Page** = Basic LLM Chain + Gemini Flash (latest) (temperature 0).\n- **Default Data Loader** stores the summary with metadata `source=website`, `url`, `title` so the agent can cite the page.",
         "width": 440,
         "height": 320
       },

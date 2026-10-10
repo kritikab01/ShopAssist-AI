@@ -42,7 +42,7 @@ flowchart LR
     W01 -- "embeddings<br/>source=faq" --> PC[("Pinecone<br/>index: shopassist")]
     W02 -- "embeddings<br/>source=website, url" --> PC
 
-    C(["Customer"]) <--> CHAT["03 Public Chat<br/>ShopAssist AI Agent<br/>Gemini 2.5 Flash"]
+    C(["Customer"]) <--> CHAT["03 Public Chat<br/>ShopAssist AI Agent<br/>Gemini Flash (latest)"]
     CHAT <-->|"faq_knowledge / website_knowledge"| PC
     CHAT <-->|"order_lookup"| PG[("Supabase Postgres<br/>orders · tickets · chat memory")]
     CHAT -->|"escalate_to_human"| W04["04 Escalation sub-workflow<br/>Structured Output ticket"]
@@ -172,7 +172,7 @@ python scripts/build_workflows.py   # prompts/* -> workflows/*.json
 
 | Purpose | Service (free tier) |
 |---|---|
-| Chat LLM | Google Gemini `models/gemini-2.5-flash` |
+| Chat LLM | Google Gemini `models/gemini-flash-latest` |
 | Embeddings | Google Gemini `models/gemini-embedding-001` (3072 dims) |
 | Vector DB | Pinecone Starter |
 | Database + chat memory | Supabase Free |

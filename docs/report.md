@@ -34,7 +34,7 @@ _(Paste the Mermaid diagram from the README here, or a screenshot of it rendered
 | Layer | Technology |
 |-------|-----------|
 | Orchestration / agent | n8n Cloud – AI Agent (Tools Agent) |
-| LLM | Google Gemini 2.5 Flash (`models/gemini-2.5-flash`, free tier) |
+| LLM | Google Gemini Flash (latest) (`models/gemini-flash-latest`, free tier) |
 | Embeddings | Google Gemini `models/gemini-embedding-001` (3072 dims, free tier) |
 | Vector DB | Pinecone index `shopassist` (3072 dims, cosine), metadata `source`, `url`, `title` |
 | Database + memory | Supabase Postgres (`orders`, `tickets`, `n8n_chat_histories`) |
@@ -51,7 +51,7 @@ _Screenshot: workflow canvas + Pinecone record count._
 
 ### 4.2 Workflow 02 – Scrape and summarize web pages
 Manual trigger → read `urls.txt` → **Code** node creates one item per URL → **HTTP Request** fetches each
-page → **HTML Extract** keeps body text without nav/footer → **Basic LLM Chain** (Gemini 2.5 Flash,
+page → **HTML Extract** keeps body text without nav/footer → **Basic LLM Chain** (Gemini Flash (latest),
 temperature 0) summarizes each page into factual bullets → **Set** adds `url` and `title` → Pinecone insert
 with metadata `source=website`, `url`, `title`. Summaries are shorter and cleaner than raw HTML, which
 improves retrieval and lets the agent cite the page URL.
@@ -142,7 +142,7 @@ Test plan: `docs/test_questions.md` (8 chat tests + 2 webhook tests).
    agent or a new inventory agent that checks stock in Postgres, drafts a purchase order (structured
    output), asks for approval in Slack, then texts the supplier via Twilio.
 2. **Flowise version:** rebuild the same agent in Flowise to compare low-code agent builders.
-3. **Local model with Ollama:** run Llama/Qwen locally for privacy and zero API cost; compare quality and latency against Gemini 2.5 Flash.
+3. **Local model with Ollama:** run Llama/Qwen locally for privacy and zero API cost; compare quality and latency against Gemini Flash (latest).
 4. WhatsApp channel via Twilio WhatsApp API; Hindi and Hinglish support.
 5. OTP verification before showing order details; automatic re-scraping on a schedule.
 6. Dashboard of ticket volume, sentiment and resolution time.
