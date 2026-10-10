@@ -32,7 +32,8 @@ Capstone project: n8n customer-support agent for a fictional store (UrbanThread)
   nomic-embed-text, 768 dims, recreate the Pinecone index at 768). Ask the user before switching.
 
 ## Next steps
-1. Load `.env`, test the Gemini key (above). Fix model names in build_workflows.py if needed.
+1. Run `python3 scripts/verify_setup.py` (read-only: .env, n8n credentials, Gemini, Pinecone 3072, Supabase).
+   Fix model names in build_workflows.py if needed.
 2. Update the n8n credential "Google Gemini(PaLM) Api" (n8n API: PATCH/POST /api/v1/credentials) or ask
    the user to paste the key in the n8n UI; make sure every Gemini node uses that one credential.
 3. Run import_to_n8n.py, then run workflow 01 then 02 once each (re-running duplicates Pinecone vectors).
