@@ -149,7 +149,8 @@ if not is_set("GOOGLE_GEMINI_API_KEY"):
 else:
     gk = ENV["GOOGLE_GEMINI_API_KEY"]
     if not gk.startswith("AIza"):
-        print("       note: key does not start with 'AIza' - is it an AI Studio key from a personal Gmail?")
+        print("       note: key does not start with 'AIza' (newer AI Studio keys may start with 'AQ.'). "
+              "Make sure it comes from a PERSONAL Gmail, not the School account. Testing it now (up to 1 min)...")
     G = "https://generativelanguage.googleapis.com/v1beta"
     st, r = http("POST", f"{G}/{CHAT_MODEL}:generateContent?key={gk}", body={
         "contents": [{"parts": [{"text": "Reply with the single word OK"}]}]})
