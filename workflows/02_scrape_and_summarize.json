@@ -1,0 +1,426 @@
+{
+  "name": "02 Scrape Web Pages, Summarize and Store",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Overview – Workflow 02\n**Goal:** scrape store web pages, summarize each with the LLM, and store the summaries in Pinecone with metadata `source = website` and `url`.\n\nFlow: read `data/urls.txt` → one item per URL → HTTP GET page → extract text from HTML → LLM summary → embed → Pinecone insert.\n\nCourse: Capstone (web scraping + summarization), Sessions 5–6 (LLM chains), 7–9 & 18 (Pinecone + metadata), 14–15 (second knowledge base).",
+        "width": 560,
+        "height": 320,
+        "color": 4
+      },
+      "id": "2b4cf87a-4bf2-505d-bb6e-1972fcbc8bbc",
+      "name": "Overview – Workflow 02",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -380
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "6a40a4c4-c607-59ae-b301-70085a3fc12a",
+      "name": "Start Scraping",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://raw.githubusercontent.com/kritikab01/ShopAssist-AI/main/data/urls.txt",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "a5ef2904-e678-5c2e-be08-c003b5fa34ae",
+      "name": "Read urls.txt",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// urls.txt has one URL per line. Turn it into one n8n item per URL.\nconst text = $input.first().json.data || '';\nreturn text\n  .split('\\n')\n  .map(line => line.trim())\n  .filter(line => line.startsWith('http'))\n  .map(url => ({ json: { url } }));\n"
+      },
+      "id": "46b052e8-cd21-5da7-be25-b5419d8d1aa1",
+      "name": "Split URLs into Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "90186981-c337-5cbe-8d19-0cf8c2bfc004",
+      "name": "Fetch Page HTML",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        600,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "dataPropertyName": "data",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "title",
+              "cssSelector": "title"
+            },
+            {
+              "key": "content",
+              "cssSelector": "body",
+              "skipSelectors": "nav,header,footer,script,style"
+            }
+          ]
+        },
+        "options": {
+          "trimValues": true,
+          "cleanUpText": true
+        }
+      },
+      "id": "9e2c2d25-d6ab-5570-8384-3cb05fa5d771",
+      "name": "Extract Text from HTML",
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        800,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Summarize this web page of the online clothing store UrbanThread for a customer-support knowledge base. Keep ALL concrete facts: numbers, prices in Rs, dates, coupon codes, time limits and conditions. Use short bullet points, max 200 words. Do not add anything that is not in the page.\n\nPage title: {{ $json.title }}\n\nPage text:\n{{ $json.content }}"
+      },
+      "id": "0a56aa0a-29fb-5b2f-a3d5-9d179da2ab43",
+      "name": "Summarize Page (LLM)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        1000,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash",
+        "options": {
+          "temperature": 0
+        }
+      },
+      "id": "8f131f2c-f443-54f4-a959-883839751a24",
+      "name": "Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1000,
+        220
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "REPLACE_ME_gemini",
+          "name": "Google Gemini account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "url",
+              "type": "string",
+              "value": "={{ $('Split URLs into Items').item.json.url }}"
+            },
+            {
+              "id": "a2",
+              "name": "title",
+              "type": "string",
+              "value": "={{ $('Extract Text from HTML').item.json.title }}"
+            },
+            {
+              "id": "a3",
+              "name": "summary",
+              "type": "string",
+              "value": "={{ $json.text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6ff07002-20ea-5f33-a127-ddc29be7a6cb",
+      "name": "Prepare Document",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "pineconeIndex": {
+          "__rl": true,
+          "value": "shopassist",
+          "mode": "list"
+        },
+        "options": {}
+      },
+      "id": "172e036a-64dc-580e-8f5d-d4e0a798f4a3",
+      "name": "Insert into Pinecone (source=website)",
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [
+        1480,
+        0
+      ],
+      "credentials": {
+        "pineconeApi": {
+          "id": "REPLACE_ME_pinecone",
+          "name": "Pinecone account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-embedding-001"
+      },
+      "id": "fbe9d159-d76f-5b02-8850-6f49dc3a9b05",
+      "name": "Gemini Embeddings",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1400,
+        240
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "REPLACE_ME_gemini",
+          "name": "Google Gemini account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "dataType": "json",
+        "jsonMode": "expressionData",
+        "jsonData": "=Page: {{ $json.title }}\nURL: {{ $json.url }}\n\n{{ $json.summary }}",
+        "textSplittingMode": "custom",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "source",
+                "value": "website"
+              },
+              {
+                "name": "url",
+                "value": "={{ $json.url }}"
+              },
+              {
+                "name": "title",
+                "value": "={{ $json.title }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "7545705d-b310-5d83-813c-6d1ea4af2cd7",
+      "name": "Default Data Loader (summary)",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [
+        1600,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "chunkSize": 1000,
+        "chunkOverlap": 200,
+        "options": {}
+      },
+      "id": "46d9e97e-7489-5d97-9ebd-2d9a15e9a16f",
+      "name": "Recursive Text Splitter 1000/200",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Step notes\n- **Read urls.txt** downloads the URL list from GitHub (one URL per line).\n- **Fetch Page HTML** runs once per URL (n8n loops over items automatically).\n- **Extract Text from HTML** keeps `<body>` text and skips nav/header/footer.\n- **Summarize Page** = Basic LLM Chain + Gemini 2.5 Flash (temperature 0).\n- **Default Data Loader** stores the summary with metadata `source=website`, `url`, `title` so the agent can cite the page.",
+        "width": 440,
+        "height": 320
+      },
+      "id": "6f8a4716-cb4b-5943-82e7-18877b380559",
+      "name": "Step notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1880,
+        -40
+      ]
+    }
+  ],
+  "connections": {
+    "Start Scraping": {
+      "main": [
+        [
+          {
+            "node": "Read urls.txt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read urls.txt": {
+      "main": [
+        [
+          {
+            "node": "Split URLs into Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split URLs into Items": {
+      "main": [
+        [
+          {
+            "node": "Fetch Page HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Page HTML": {
+      "main": [
+        [
+          {
+            "node": "Extract Text from HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Text from HTML": {
+      "main": [
+        [
+          {
+            "node": "Summarize Page (LLM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize Page (LLM)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Document": {
+      "main": [
+        [
+          {
+            "node": "Insert into Pinecone (source=website)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Summarize Page (LLM)",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Embeddings": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Insert into Pinecone (source=website)",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Default Data Loader (summary)": {
+      "ai_document": [
+        [
+          {
+            "node": "Insert into Pinecone (source=website)",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recursive Text Splitter 1000/200": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Default Data Loader (summary)",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "tags": []
+}

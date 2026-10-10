@@ -1,0 +1,4 @@
+https://raw.githubusercontent.com/kritikab01/ShopAssist-AI/main/data/pages/shipping.html
+https://raw.githubusercontent.com/kritikab01/ShopAssist-AI/main/data/pages/size-guide.html
+https://raw.githubusercontent.com/kritikab01/ShopAssist-AI/main/data/pages/offers.html
+https://raw.githubusercontent.com/kritikab01/ShopAssist-AI/main/data/pages/care-and-sustainability.html

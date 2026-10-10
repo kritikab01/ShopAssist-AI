@@ -1,0 +1,218 @@
+{
+  "name": "01 Ingest FAQ PDF into Pinecone",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Overview – Workflow 01\n**Goal:** load the store FAQ/policy PDF into the Pinecone index `shopassist` so the agent can search it (RAG).\n\nFlow: Manual trigger → download PDF → split into 1000-char chunks (200 overlap) → embed with Gemini `gemini-embedding-001` (3072 dims) → insert with metadata `source = faq`.\n\n**Run once** (running again adds duplicates – clear the index first).\n\nCourse: Sessions 7–9 (RAG with Pinecone), 18 (metadata).",
+        "width": 520,
+        "height": 300,
+        "color": 4
+      },
+      "id": "db4f7471-da8b-528f-a3bc-9d85846a32d2",
+      "name": "Overview – Workflow 01",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -360
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "632210f6-9f6b-5bc8-ae9f-2f520425d1d0",
+      "name": "Start Ingestion",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://raw.githubusercontent.com/kritikab01/ShopAssist-AI/main/data/store_faq.pdf",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "8278a8ee-dcc1-5b52-aecc-2fccd5cee791",
+      "name": "Download FAQ PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "pineconeIndex": {
+          "__rl": true,
+          "value": "shopassist",
+          "mode": "list"
+        },
+        "options": {}
+      },
+      "id": "de6f5eef-a439-575a-b940-649d92a8cd0d",
+      "name": "Insert into Pinecone (source=faq)",
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [
+        460,
+        0
+      ],
+      "credentials": {
+        "pineconeApi": {
+          "id": "REPLACE_ME_pinecone",
+          "name": "Pinecone account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-embedding-001"
+      },
+      "id": "94816f20-cda9-50a9-a2a3-9bf784a62987",
+      "name": "Gemini Embeddings",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        380,
+        240
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "REPLACE_ME_gemini",
+          "name": "Google Gemini account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "dataType": "binary",
+        "loader": "pdfLoader",
+        "textSplittingMode": "custom",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "source",
+                "value": "faq"
+              },
+              {
+                "name": "file",
+                "value": "store_faq.pdf"
+              }
+            ]
+          }
+        }
+      },
+      "id": "11d2e618-d49b-5d3d-ba19-860101064977",
+      "name": "Default Data Loader (PDF)",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [
+        580,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "chunkSize": 1000,
+        "chunkOverlap": 200,
+        "options": {}
+      },
+      "id": "e6ff854f-991c-5112-9193-9badab5b5a2e",
+      "name": "Recursive Text Splitter 1000/200",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [
+        660,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Step notes\n- **Download FAQ PDF**: raw GitHub URL of `data/store_faq.pdf` (repo must be public). Alternative: replace with a *Google Drive → Download file* node.\n- **Default Data Loader** reads the binary PDF and adds metadata `source=faq` – the agent's `faq_knowledge` tool filters on it.\n- **Recursive Text Splitter**: chunk size 1000, overlap 200.\n- **Gemini Embeddings**: `gemini-embedding-001`, 3072-dim vectors; index must use the same dimension and cosine.",
+        "width": 420,
+        "height": 320
+      },
+      "id": "83afddfe-c432-58f4-836d-91e5dd99d6ed",
+      "name": "Step notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        860,
+        -40
+      ]
+    }
+  ],
+  "connections": {
+    "Start Ingestion": {
+      "main": [
+        [
+          {
+            "node": "Download FAQ PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download FAQ PDF": {
+      "main": [
+        [
+          {
+            "node": "Insert into Pinecone (source=faq)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Embeddings": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Insert into Pinecone (source=faq)",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Default Data Loader (PDF)": {
+      "ai_document": [
+        [
+          {
+            "node": "Insert into Pinecone (source=faq)",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recursive Text Splitter 1000/200": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Default Data Loader (PDF)",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "tags": []
+}

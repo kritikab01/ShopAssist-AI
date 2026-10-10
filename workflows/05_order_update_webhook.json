@@ -1,0 +1,207 @@
+{
+  "name": "05 Order Status Update Webhook",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Overview – Workflow 05\n**Goal:** the store/courier system calls this webhook when an order status changes.\n\n`POST /webhook/order-update` with JSON body:\n`{\"order_id\": \"UT1003\", \"status\": \"delayed\", \"new_expected_delivery\": \"2026-10-15\"}`\n(`new_expected_delivery` is optional)\n\nFlow: update `orders` in Postgres → if status is `delayed`, SMS the customer via Twilio → reply with JSON.\n\nCourse: 3–4 (webhooks, IF node), 19–20 (Postgres), 21–22 & capstone (Twilio SMS).",
+        "width": 560,
+        "height": 360,
+        "color": 4
+      },
+      "id": "1df84b4f-0d83-5943-b98a-4a2a985d052c",
+      "name": "Overview – Workflow 05",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -120,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "order-update",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "ac9d5291-f274-5bda-8224-0a066d5f98f7",
+      "name": "Order Update Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "03649e09-8ed1-536b-b9cb-81a526d4035c"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE orders\nSET status = LOWER($2),\n    expected_delivery = COALESCE(NULLIF($3, '')::date, expected_delivery),\n    updated_at = now()\nWHERE order_id = UPPER($1)\nRETURNING order_id, customer_name, phone, status, expected_delivery;",
+        "options": {
+          "queryReplacement": "={{ [ $json.body.order_id, $json.body.status, $json.body.new_expected_delivery || '' ] }}"
+        }
+      },
+      "id": "9afb0151-29ae-5e96-9076-57d0c0f4d0cb",
+      "name": "Update Order Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME_postgres",
+          "name": "Supabase Postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "delayed",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a26c0b98-e5af-5224-a816-8519ade987e3",
+      "name": "Is Delayed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "from": "+10000000000",
+        "to": "={{ $json.phone }}",
+        "message": "=Hi {{ $json.customer_name }}, sorry! Your UrbanThread order {{ $json.order_id }} is delayed. New expected delivery: {{ $json.expected_delivery ? DateTime.fromISO(String($json.expected_delivery).slice(0, 10)).toFormat('dd LLL yyyy') : 'we will update you soon' }}. Reply or chat with ShopAssist for help.",
+        "options": {}
+      },
+      "id": "24ee094e-91ed-5df4-a078-3d8042e6b6c2",
+      "name": "SMS Delay Notice (Twilio)",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        680,
+        -120
+      ],
+      "credentials": {
+        "twilioApi": {
+          "id": "REPLACE_ME_twilio",
+          "name": "Twilio account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  ok: !!$('Update Order Status').item.json.order_id,\n  order_id: $('Update Order Status').item.json.order_id || null,\n  status: $('Update Order Status').item.json.status || null,\n  sms_sent: $('Update Order Status').item.json.status === 'delayed',\n  message: $('Update Order Status').item.json.order_id ? 'Order updated' : 'Order not found'\n}) }}",
+        "options": {}
+      },
+      "id": "d2a686d4-0846-5efe-a5a7-49edf83d3d60",
+      "name": "Respond to Caller",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Test with curl\n```\ncurl -X POST \\\n  https://YOUR-N8N.app.n8n.cloud/webhook-test/order-update \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"order_id\":\"UT1002\",\"status\":\"delayed\",\"new_expected_delivery\":\"2026-10-15\"}'\n```\nUse `/webhook-test/` while testing in the editor, `/webhook/` after activating.\nUnknown order IDs return `ok: false` (Postgres node has *Always Output Data* on).",
+        "width": 480,
+        "height": 300
+      },
+      "id": "8c0696dc-0e6c-5b1e-a4ec-5cad6ee73b88",
+      "name": "Test with curl",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        -60
+      ]
+    }
+  ],
+  "connections": {
+    "Order Update Webhook": {
+      "main": [
+        [
+          {
+            "node": "Update Order Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Order Status": {
+      "main": [
+        [
+          {
+            "node": "Is Delayed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Delayed?": {
+      "main": [
+        [
+          {
+            "node": "SMS Delay Notice (Twilio)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Caller",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SMS Delay Notice (Twilio)": {
+      "main": [
+        [
+          {
+            "node": "Respond to Caller",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "tags": []
+}

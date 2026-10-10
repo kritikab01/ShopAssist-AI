@@ -1,0 +1,14 @@
+{
+  "type": "object",
+  "properties": {
+    "customer_name": { "type": "string", "description": "Customer name, or 'Unknown' if not given" },
+    "phone": { "type": "string", "description": "Customer phone in E.164 format (e.g. +919000000003), or empty string if not given" },
+    "order_id": { "type": "string", "description": "Order ID like UT1003, or empty string if not relevant" },
+    "issue_type": { "type": "string", "enum": ["refund", "return", "delivery", "damaged_item", "payment", "size", "other"] },
+    "sentiment": { "type": "string", "enum": ["positive", "neutral", "negative", "angry"] },
+    "priority": { "type": "string", "enum": ["low", "medium", "high"], "description": "high if angry, refund > Rs 5,000, damaged item or payment problem" },
+    "summary": { "type": "string", "description": "2-3 sentence summary of the problem for the human agent" },
+    "suggested_action": { "type": "string", "description": "One concrete next step for the human agent" }
+  },
+  "required": ["customer_name", "phone", "order_id", "issue_type", "sentiment", "priority", "summary", "suggested_action"]
+}
