@@ -100,7 +100,9 @@ See `.env.example` for the full checklist. **Never commit real keys.**
    `raw.githubusercontent.com/.../main/...`). If your branch is not merged into `main` yet, either merge it
    or change `main` in the URLs (HTTP Request nodes and `data/urls.txt`) to your branch name.
 5. **n8n Cloud** – create the 6 credentials (section 5).
-6. **Import workflows** – in n8n: *Overview → Create workflow → ⋯ menu → Import from File*, one file at a
+6. **Import workflows (one command, self-hosted n8n)** – create an API key in n8n (*Settings → n8n API*), then on
+   your computer run `N8N_URL=http://localhost:5679 N8N_API_KEY=... python3 scripts/import_to_n8n.py`.
+   It creates all 5 workflows and links 03 → 04 automatically (skip step 7). **Or manually** – in n8n: *Overview → Create workflow → ⋯ menu → Import from File*, one file at a
    time, in this order: **04 → 03 → 01 → 02 → 05**. In each workflow, open every node with a warning
    triangle and select your credential.
 7. **Link 03 → 04** – open workflow 04, copy the ID from the browser URL (`/workflow/<ID>`), then in
