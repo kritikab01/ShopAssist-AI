@@ -84,6 +84,28 @@ def http(method, url, headers=None, body=None, timeout=30):
         return status, raw
 
 
+def can_connect(host, port=443):
+    """Quick TCP test per IP version (5 s each), to spot networks that block or hang."""
+    import socket
+    out = {}
+    for fam, name in ((socket.AF_INET, "IPv4"), (socket.AF_INET6, "IPv6")):
+        try:
+            addr = socket.getaddrinfo(host, port, fam, socket.SOCK_STREAM)[0][4]
+        except OSError:
+            out[name] = "no address"
+            continue
+        sock = socket.socket(fam, socket.SOCK_STREAM)
+        sock.settimeout(5)
+        try:
+            sock.connect(addr)
+            out[name] = "ok"
+        except OSError as e:
+            out[name] = f"FAILED ({e.__class__.__name__})"
+        finally:
+            sock.close()
+    return out
+
+
 def api_error(payload):
     if isinstance(payload, dict):
         err = payload.get("error", payload)
@@ -114,7 +136,9 @@ else:
     H = {"X-N8N-API-KEY": ENV["N8N_API_KEY"], "Accept": "application/json"}
     st, wfs = http("GET", f"{n8n}/api/v1/workflows?limit=100", H)
     if st != 200:
-        report("n8n", False, f"cannot use n8n API at {n8n}: HTTP {st} {api_error(wfs)}")
+        hint = (" -> the key is wrong, expired, or from another n8n. In localhost:5679 go to Settings -> n8n API, "
+                "delete the old key, Create an API key (no expiry), copy ALL of it into N8N_API_KEY in .env")
+        report("n8n", False, f"cannot use n8n API at {n8n}: HTTP {st} {api_error(wfs)}" + (hint if st == 401 else ""))
     else:
         mine = [w for w in wfs.get("data", []) if w["name"][:3] in ("01 ", "02 ", "03 ", "04 ", "05 ")]
         report("n8n", True, f"API key works; {len(mine)} ShopAssist workflows found")
@@ -152,15 +176,20 @@ else:
         print("       note: key does not start with 'AIza' (newer AI Studio keys may start with 'AQ.'). "
               "Make sure it comes from a PERSONAL Gmail, not the School account. Testing it now (up to 1 min)...")
     G = "https://generativelanguage.googleapis.com/v1beta"
+    net = can_connect("generativelanguage.googleapis.com")
+    print(f"       network to Google: IPv4 {net['IPv4']}, IPv6 {net['IPv6']}")
+    if net["IPv4"] != "ok" and net["IPv6"] != "ok":
+        report("Gemini", False, "this Mac cannot reach generativelanguage.googleapis.com - switch Wi-Fi / phone "
+                                "hotspot, turn off VPN or firewall, then try again")
     st, r = http("POST", f"{G}/{CHAT_MODEL}:generateContent?key={gk}", body={
-        "contents": [{"parts": [{"text": "Reply with the single word OK"}]}]})
+        "contents": [{"parts": [{"text": "Reply with the single word OK"}]}]}, timeout=20)
     if st == 200 and r.get("candidates"):
         report("Gemini", True, f"chat {CHAT_MODEL} answers: "
                                f"{clean(r['candidates'][0]['content']['parts'][0].get('text', '')).strip()[:20]}")
     else:
         report("Gemini", False, f"chat {CHAT_MODEL}: HTTP {st} {api_error(r)}")
     st, r = http("POST", f"{G}/{EMBED_MODEL}:batchEmbedContents?key={gk}", body={"requests": [
-        {"model": EMBED_MODEL, "content": {"parts": [{"text": "return policy"}]}}]})
+        {"model": EMBED_MODEL, "content": {"parts": [{"text": "return policy"}]}}]}, timeout=20)
     if st == 200 and r.get("embeddings"):
         dims = len(r["embeddings"][0].get("values", []))
         report("Gemini", dims == PINECONE_DIM, f"batch embeddings {EMBED_MODEL}: {dims} dimensions "
