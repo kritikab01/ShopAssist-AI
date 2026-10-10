@@ -18,12 +18,13 @@ OUT_DIR = ROOT / "workflows"
 RAW_BASE = "https://raw.githubusercontent.com/kritikab01/ShopAssist-AI/main"
 
 PINECONE_INDEX = "shopassist"
-CHAT_MODEL = "gpt-4o-mini"
-EMBED_MODEL = "text-embedding-3-small"
+# Free-tier Google Gemini (API key from aistudio.google.com, no credit card).
+CHAT_MODEL = "models/gemini-2.5-flash"
+EMBED_MODEL = "models/gemini-embedding-001"  # 3072-dim vectors (text-embedding-004 is deprecated)
 
 # Placeholder credentials: after import, open each node and pick your own credential.
 CRED = {
-    "openAiApi": {"id": "REPLACE_ME_openai", "name": "OpenAI account"},
+    "googlePalmApi": {"id": "REPLACE_ME_gemini", "name": "Google Gemini account"},
     "pineconeApi": {"id": "REPLACE_ME_pinecone", "name": "Pinecone account"},
     "postgres": {"id": "REPLACE_ME_postgres", "name": "Supabase Postgres"},
     "slackApi": {"id": "REPLACE_ME_slack", "name": "Slack account"},
@@ -89,15 +90,15 @@ def rl(value, mode="list"):
     return {"__rl": True, "value": value, "mode": mode}
 
 
-def openai_chat(wf, name, pos, temperature=0.2):
-    return wf.node(name, "@n8n/n8n-nodes-langchain.lmChatOpenAi", 1.2, pos,
-                   {"model": rl(CHAT_MODEL), "options": {"temperature": temperature}},
-                   ["openAiApi"])
+def gemini_chat(wf, name, pos, temperature=0.2):
+    return wf.node(name, "@n8n/n8n-nodes-langchain.lmChatGoogleGemini", 1, pos,
+                   {"modelName": CHAT_MODEL, "options": {"temperature": temperature}},
+                   ["googlePalmApi"])
 
 
-def openai_embeddings(wf, name, pos):
-    return wf.node(name, "@n8n/n8n-nodes-langchain.embeddingsOpenAi", 1.2, pos,
-                   {"model": EMBED_MODEL, "options": {}}, ["openAiApi"])
+def gemini_embeddings(wf, name, pos):
+    return wf.node(name, "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini", 1, pos,
+                   {"modelName": EMBED_MODEL}, ["googlePalmApi"])
 
 
 def text_splitter(wf, name, pos):
@@ -122,7 +123,7 @@ def wf01():
               "**Goal:** load the store FAQ/policy PDF into the Pinecone index `shopassist` "
               "so the agent can search it (RAG).\n\n"
               "Flow: Manual trigger → download PDF → split into 1000-char chunks (200 overlap) → "
-              "embed with `text-embedding-3-small` (1536 dims) → insert with metadata `source = faq`.\n\n"
+              "embed with Gemini `gemini-embedding-001` (3072 dims) → insert with metadata `source = faq`.\n\n"
               "**Run once** (running again adds duplicates – clear the index first).\n\n"
               "Course: Sessions 7–9 (RAG with Pinecone), 18 (metadata).",
               (-80, -360), w=520, h=300, color=4)
@@ -132,7 +133,7 @@ def wf01():
         "options": {"response": {"response": {"responseFormat": "file"}}},
     })
     pc = pinecone_insert(wf, "Insert into Pinecone (source=faq)", (460, 0))
-    emb = openai_embeddings(wf, "OpenAI Embeddings", (380, 240))
+    emb = gemini_embeddings(wf, "Gemini Embeddings", (380, 240))
     loader = wf.node("Default Data Loader (PDF)", "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
                      1.1, (580, 240), {
                          "dataType": "binary",
@@ -148,7 +149,7 @@ def wf01():
               "- **Default Data Loader** reads the binary PDF and adds metadata `source=faq` – "
               "the agent's `faq_knowledge` tool filters on it.\n"
               "- **Recursive Text Splitter**: chunk size 1000, overlap 200.\n"
-              "- **OpenAI Embeddings**: 1536-dim vectors; index must use the same dimension and cosine.",
+              "- **Gemini Embeddings**: `gemini-embedding-001`, 3072-dim vectors; index must use the same dimension and cosine.",
               (860, -40), w=420, h=320)
     wf.link(t, dl)
     wf.link(dl, pc)
@@ -209,7 +210,7 @@ def wf02():
             "Page title: {{ $json.title }}\n\nPage text:\n{{ $json.content }}"
         ),
     })
-    llm = openai_chat(wf, "OpenAI Chat Model (gpt-4o-mini)", (1000, 220), temperature=0)
+    llm = gemini_chat(wf, "Gemini Chat Model", (1000, 220), temperature=0)
     prep = wf.node("Prepare Document", "n8n-nodes-base.set", 3.4, (1240, 0), {
         "assignments": {"assignments": [
             {"id": "a1", "name": "url", "type": "string",
@@ -221,7 +222,7 @@ def wf02():
         "options": {},
     })
     pc = pinecone_insert(wf, "Insert into Pinecone (source=website)", (1480, 0))
-    emb = openai_embeddings(wf, "OpenAI Embeddings", (1400, 240))
+    emb = gemini_embeddings(wf, "Gemini Embeddings", (1400, 240))
     loader = wf.node("Default Data Loader (summary)", "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
                      1.1, (1600, 240), {
                          "dataType": "json",
@@ -237,7 +238,7 @@ def wf02():
               "- **Read urls.txt** downloads the URL list from GitHub (one URL per line).\n"
               "- **Fetch Page HTML** runs once per URL (n8n loops over items automatically).\n"
               "- **Extract Text from HTML** keeps `<body>` text and skips nav/header/footer.\n"
-              "- **Summarize Page** = Basic LLM Chain + gpt-4o-mini (temperature 0).\n"
+              "- **Summarize Page** = Basic LLM Chain + Gemini 2.5 Flash (temperature 0).\n"
               "- **Default Data Loader** stores the summary with metadata `source=website`, `url`, "
               "`title` so the agent can cite the page.",
               (1880, -40), w=440, h=320)
@@ -285,7 +286,7 @@ def wf03():
         "promptType": "auto",
         "options": {"systemMessage": "=" + system_prompt, "maxIterations": 8},
     })
-    llm = openai_chat(wf, "OpenAI Chat Model (gpt-4o-mini)", (0, 300))
+    llm = gemini_chat(wf, "Gemini Chat Model", (0, 300))
     mem = wf.node("Postgres Chat Memory", "@n8n/n8n-nodes-langchain.memoryPostgresChat", 1.3, (180, 300), {
         "tableName": "n8n_chat_histories",
         "contextWindowLength": 10,
@@ -301,7 +302,7 @@ def wf03():
             "includeDocumentMetadata": True,
             "options": {"metadata": metadata(("source", source))},
         }, ["pineconeApi"])
-        emb = openai_embeddings(wf, f"Embeddings ({source})", (x, 520))
+        emb = gemini_embeddings(wf, f"Gemini Embeddings ({source})", (x, 520))
         wf.link(emb, node, "ai_embedding")
         wf.link(node, agent, "ai_tool")
 
@@ -419,7 +420,7 @@ def wf04():
                         ),
                         "hasOutputParser": True,
                     })
-    llm = openai_chat(wf, "OpenAI Chat Model (gpt-4o-mini)", (160, 240), temperature=0)
+    llm = gemini_chat(wf, "Gemini Chat Model", (160, 240), temperature=0)
     parser = wf.node("Ticket JSON Schema", "@n8n/n8n-nodes-langchain.outputParserStructured", 1.2,
                      (360, 240), {"schemaType": "manual", "inputSchema": schema})
     T = "$('Build Ticket (Structured Output)').item.json.output"

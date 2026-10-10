@@ -58,27 +58,23 @@
     },
     {
       "parameters": {
-        "model": {
-          "__rl": true,
-          "value": "gpt-4o-mini",
-          "mode": "list"
-        },
+        "modelName": "models/gemini-2.5-flash",
         "options": {
           "temperature": 0.2
         }
       },
-      "id": "4cf58159-e8b8-5521-951e-875767b37bd4",
-      "name": "OpenAI Chat Model (gpt-4o-mini)",
-      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
-      "typeVersion": 1.2,
+      "id": "399c3214-2ac0-53fb-97ca-8f1c32d3b46d",
+      "name": "Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
       "position": [
         0,
         300
       ],
       "credentials": {
-        "openAiApi": {
-          "id": "REPLACE_ME_openai",
-          "name": "OpenAI account"
+        "googlePalmApi": {
+          "id": "REPLACE_ME_gemini",
+          "name": "Google Gemini account"
         }
       }
     },
@@ -142,21 +138,20 @@
     },
     {
       "parameters": {
-        "model": "text-embedding-3-small",
-        "options": {}
+        "modelName": "models/gemini-embedding-001"
       },
-      "id": "afc4b12f-9dca-5e24-ba40-6c0ce9dbfa96",
-      "name": "Embeddings (faq)",
-      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
-      "typeVersion": 1.2,
+      "id": "50049dc3-7bff-5530-a487-9d5e1d697526",
+      "name": "Gemini Embeddings (faq)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
       "position": [
         360,
         520
       ],
       "credentials": {
-        "openAiApi": {
-          "id": "REPLACE_ME_openai",
-          "name": "OpenAI account"
+        "googlePalmApi": {
+          "id": "REPLACE_ME_gemini",
+          "name": "Google Gemini account"
         }
       }
     },
@@ -200,21 +195,20 @@
     },
     {
       "parameters": {
-        "model": "text-embedding-3-small",
-        "options": {}
+        "modelName": "models/gemini-embedding-001"
       },
-      "id": "f81a3a2f-7848-5357-bebd-bbfb9852ca05",
-      "name": "Embeddings (website)",
-      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
-      "typeVersion": 1.2,
+      "id": "6ad52ac8-44d1-5f51-b709-033d10739cc6",
+      "name": "Gemini Embeddings (website)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
       "position": [
         560,
         520
       ],
       "credentials": {
-        "openAiApi": {
-          "id": "REPLACE_ME_openai",
-          "name": "OpenAI account"
+        "googlePalmApi": {
+          "id": "REPLACE_ME_gemini",
+          "name": "Google Gemini account"
         }
       }
     },
@@ -343,7 +337,7 @@
     }
   ],
   "connections": {
-    "Embeddings (faq)": {
+    "Gemini Embeddings (faq)": {
       "ai_embedding": [
         [
           {
@@ -365,7 +359,7 @@
         ]
       ]
     },
-    "Embeddings (website)": {
+    "Gemini Embeddings (website)": {
       "ai_embedding": [
         [
           {
@@ -420,7 +414,7 @@
         ]
       ]
     },
-    "OpenAI Chat Model (gpt-4o-mini)": {
+    "Gemini Chat Model": {
       "ai_languageModel": [
         [
           {

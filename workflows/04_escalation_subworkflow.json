@@ -66,27 +66,23 @@
     },
     {
       "parameters": {
-        "model": {
-          "__rl": true,
-          "value": "gpt-4o-mini",
-          "mode": "list"
-        },
+        "modelName": "models/gemini-2.5-flash",
         "options": {
           "temperature": 0
         }
       },
-      "id": "a91c16e4-347e-56e4-977c-e1eec848636e",
-      "name": "OpenAI Chat Model (gpt-4o-mini)",
-      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
-      "typeVersion": 1.2,
+      "id": "e1515801-c957-5829-acbf-15fe672d77ef",
+      "name": "Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
       "position": [
         160,
         240
       ],
       "credentials": {
-        "openAiApi": {
-          "id": "REPLACE_ME_openai",
-          "name": "OpenAI account"
+        "googlePalmApi": {
+          "id": "REPLACE_ME_gemini",
+          "name": "Google Gemini account"
         }
       }
     },
@@ -320,7 +316,7 @@
         ]
       ]
     },
-    "OpenAI Chat Model (gpt-4o-mini)": {
+    "Gemini Chat Model": {
       "ai_languageModel": [
         [
           {

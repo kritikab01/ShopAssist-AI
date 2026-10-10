@@ -130,27 +130,23 @@
     },
     {
       "parameters": {
-        "model": {
-          "__rl": true,
-          "value": "gpt-4o-mini",
-          "mode": "list"
-        },
+        "modelName": "models/gemini-2.5-flash",
         "options": {
           "temperature": 0
         }
       },
-      "id": "ff751e59-673e-5283-8b75-907e468a5c5b",
-      "name": "OpenAI Chat Model (gpt-4o-mini)",
-      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
-      "typeVersion": 1.2,
+      "id": "8f131f2c-f443-54f4-a959-883839751a24",
+      "name": "Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
       "position": [
         1000,
         220
       ],
       "credentials": {
-        "openAiApi": {
-          "id": "REPLACE_ME_openai",
-          "name": "OpenAI account"
+        "googlePalmApi": {
+          "id": "REPLACE_ME_gemini",
+          "name": "Google Gemini account"
         }
       }
     },
@@ -216,21 +212,20 @@
     },
     {
       "parameters": {
-        "model": "text-embedding-3-small",
-        "options": {}
+        "modelName": "models/gemini-embedding-001"
       },
-      "id": "90958d09-13ba-57bb-8511-dfefb3e27026",
-      "name": "OpenAI Embeddings",
-      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
-      "typeVersion": 1.2,
+      "id": "fbe9d159-d76f-5b02-8850-6f49dc3a9b05",
+      "name": "Gemini Embeddings",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
       "position": [
         1400,
         240
       ],
       "credentials": {
-        "openAiApi": {
-          "id": "REPLACE_ME_openai",
-          "name": "OpenAI account"
+        "googlePalmApi": {
+          "id": "REPLACE_ME_gemini",
+          "name": "Google Gemini account"
         }
       }
     },
@@ -285,7 +280,7 @@
     },
     {
       "parameters": {
-        "content": "## Step notes\n- **Read urls.txt** downloads the URL list from GitHub (one URL per line).\n- **Fetch Page HTML** runs once per URL (n8n loops over items automatically).\n- **Extract Text from HTML** keeps `<body>` text and skips nav/header/footer.\n- **Summarize Page** = Basic LLM Chain + gpt-4o-mini (temperature 0).\n- **Default Data Loader** stores the summary with metadata `source=website`, `url`, `title` so the agent can cite the page.",
+        "content": "## Step notes\n- **Read urls.txt** downloads the URL list from GitHub (one URL per line).\n- **Fetch Page HTML** runs once per URL (n8n loops over items automatically).\n- **Extract Text from HTML** keeps `<body>` text and skips nav/header/footer.\n- **Summarize Page** = Basic LLM Chain + Gemini 2.5 Flash (temperature 0).\n- **Default Data Loader** stores the summary with metadata `source=website`, `url`, `title` so the agent can cite the page.",
         "width": 440,
         "height": 320
       },
@@ -377,7 +372,7 @@
         ]
       ]
     },
-    "OpenAI Chat Model (gpt-4o-mini)": {
+    "Gemini Chat Model": {
       "ai_languageModel": [
         [
           {
@@ -388,7 +383,7 @@
         ]
       ]
     },
-    "OpenAI Embeddings": {
+    "Gemini Embeddings": {
       "ai_embedding": [
         [
           {

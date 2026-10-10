@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## Overview – Workflow 01\n**Goal:** load the store FAQ/policy PDF into the Pinecone index `shopassist` so the agent can search it (RAG).\n\nFlow: Manual trigger → download PDF → split into 1000-char chunks (200 overlap) → embed with `text-embedding-3-small` (1536 dims) → insert with metadata `source = faq`.\n\n**Run once** (running again adds duplicates – clear the index first).\n\nCourse: Sessions 7–9 (RAG with Pinecone), 18 (metadata).",
+        "content": "## Overview – Workflow 01\n**Goal:** load the store FAQ/policy PDF into the Pinecone index `shopassist` so the agent can search it (RAG).\n\nFlow: Manual trigger → download PDF → split into 1000-char chunks (200 overlap) → embed with Gemini `gemini-embedding-001` (3072 dims) → insert with metadata `source = faq`.\n\n**Run once** (running again adds duplicates – clear the index first).\n\nCourse: Sessions 7–9 (RAG with Pinecone), 18 (metadata).",
         "width": 520,
         "height": 300,
         "color": 4
@@ -75,21 +75,20 @@
     },
     {
       "parameters": {
-        "model": "text-embedding-3-small",
-        "options": {}
+        "modelName": "models/gemini-embedding-001"
       },
-      "id": "fc7a10c8-ed82-5bd6-a07e-f5c979881618",
-      "name": "OpenAI Embeddings",
-      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
-      "typeVersion": 1.2,
+      "id": "94816f20-cda9-50a9-a2a3-9bf784a62987",
+      "name": "Gemini Embeddings",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
       "position": [
         380,
         240
       ],
       "credentials": {
-        "openAiApi": {
-          "id": "REPLACE_ME_openai",
-          "name": "OpenAI account"
+        "googlePalmApi": {
+          "id": "REPLACE_ME_gemini",
+          "name": "Google Gemini account"
         }
       }
     },
@@ -139,7 +138,7 @@
     },
     {
       "parameters": {
-        "content": "## Step notes\n- **Download FAQ PDF**: raw GitHub URL of `data/store_faq.pdf` (repo must be public). Alternative: replace with a *Google Drive → Download file* node.\n- **Default Data Loader** reads the binary PDF and adds metadata `source=faq` – the agent's `faq_knowledge` tool filters on it.\n- **Recursive Text Splitter**: chunk size 1000, overlap 200.\n- **OpenAI Embeddings**: 1536-dim vectors; index must use the same dimension and cosine.",
+        "content": "## Step notes\n- **Download FAQ PDF**: raw GitHub URL of `data/store_faq.pdf` (repo must be public). Alternative: replace with a *Google Drive → Download file* node.\n- **Default Data Loader** reads the binary PDF and adds metadata `source=faq` – the agent's `faq_knowledge` tool filters on it.\n- **Recursive Text Splitter**: chunk size 1000, overlap 200.\n- **Gemini Embeddings**: `gemini-embedding-001`, 3072-dim vectors; index must use the same dimension and cosine.",
         "width": 420,
         "height": 320
       },
@@ -176,7 +175,7 @@
         ]
       ]
     },
-    "OpenAI Embeddings": {
+    "Gemini Embeddings": {
       "ai_embedding": [
         [
           {

@@ -1,7 +1,10 @@
 # ShopAssist-AI
 
-**Agentic RAG customer-support agent for an online clothing store, built with n8n, OpenAI, Pinecone,
+**Agentic RAG customer-support agent for an online clothing store, built with n8n, Google Gemini, Pinecone,
 Supabase Postgres, Twilio, Slack and Gmail SMTP.**
+
+All services used are free tiers; no credit card needed.
+(n8n Cloud is a free 14-day trial; to keep it free afterwards, self-host n8n Community Edition with Docker.)
 
 Individual capstone – *Agentic AI for Business Automation*.
 All data (brand, customers, orders, phone numbers, policies) is **fictional**.
@@ -39,7 +42,7 @@ flowchart LR
     W01 -- "embeddings<br/>source=faq" --> PC[("Pinecone<br/>index: shopassist")]
     W02 -- "embeddings<br/>source=website, url" --> PC
 
-    C(["Customer"]) <--> CHAT["03 Public Chat<br/>ShopAssist AI Agent<br/>gpt-4o-mini"]
+    C(["Customer"]) <--> CHAT["03 Public Chat<br/>ShopAssist AI Agent<br/>Gemini 2.5 Flash"]
     CHAT <-->|"faq_knowledge / website_knowledge"| PC
     CHAT <-->|"order_lookup"| PG[("Supabase Postgres<br/>orders · tickets · chat memory")]
     CHAT -->|"escalate_to_human"| W04["04 Escalation sub-workflow<br/>Structured Output ticket"]
@@ -67,17 +70,17 @@ scripts/     make_faq_pdf.py (md → pdf) · build_workflows.py (regenerates wor
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| `01_ingest_faq_pdf.json` | Manual | Download FAQ PDF → Default Data Loader + Recursive splitter (1000/200) → OpenAI embeddings → Pinecone, `source=faq` |
+| `01_ingest_faq_pdf.json` | Manual | Download FAQ PDF → Default Data Loader + Recursive splitter (1000/200) → Gemini embeddings → Pinecone, `source=faq` |
 | `02_scrape_and_summarize.json` | Manual | Read `urls.txt` → HTTP Request each page → HTML extract → LLM summary → embeddings → Pinecone, `source=website`, `url` |
 | `03_support_agent_chat.json` | Public Chat | Tools Agent + Postgres Chat Memory + tools `faq_knowledge`, `website_knowledge`, `order_lookup`, `escalate_to_human` |
 | `04_escalation_subworkflow.json` | Called by 03 | LLM + Structured Output Parser → `tickets` insert → Slack → Twilio SMS → SMTP e-mail → returns ticket ID |
 | `05_order_update_webhook.json` | Webhook POST | Update order status → if `delayed`, SMS the customer → JSON response |
 
-## 5. Credentials you need (all have free tiers / trials)
+## 5. Credentials you need (all free, no credit card)
 
 | n8n credential type | Used in | How to get it |
 |---------------------|---------|---------------|
-| **OpenAI** | 01–04 | platform.openai.com → API keys (add a few $ of credit) |
+| **Google Gemini (PaLM) API** | 01–04 | aistudio.google.com → *Get API key* → Create API key (free, no card). In n8n the credential is called *Google Gemini(PaLM) Api*; leave Host as default |
 | **Pinecone** | 01–03 | app.pinecone.io → API keys |
 | **Postgres** | 03–05 | Supabase → Project Settings → Database → *Connection pooler* (Session mode, port 5432), SSL on |
 | **Slack API** | 04 | api.slack.com/apps → create app → Bot scopes `chat:write`, `channels:read` → install → Bot token `xoxb-…` |
@@ -88,7 +91,8 @@ See `.env.example` for the full checklist. **Never commit real keys.**
 
 ## 6. Setup (≈ 60–90 minutes)
 
-1. **Pinecone** – create index `shopassist`, dimension **1536**, metric **cosine** (serverless, any region).
+1. **Pinecone** – create index `shopassist`, dimension **3072**, metric **cosine** (serverless, free Starter plan; AWS us-east-1).
+   3072 must match `gemini-embedding-001`; an index with any other dimension will reject the vectors.
 2. **Supabase** – new project → SQL Editor → run `database/schema.sql`, then `database/seed.sql`.
    For the SMS demo, change one order's `phone` to your Twilio-verified number.
 3. **Slack** – create channel `#support-escalations`, create the bot, `/invite @YourBot` in the channel.
@@ -146,9 +150,22 @@ python scripts/make_faq_pdf.py      # data/store_faq.md -> data/store_faq.pdf
 python scripts/build_workflows.py   # prompts/* -> workflows/*.json
 ```
 
-## 10. Limitations
+## 10. Stack
 
-Fake data only; a single Pinecone index with metadata filters (no namespaces); no authentication on the
+| Purpose | Service (free tier) |
+|---|---|
+| Chat LLM | Google Gemini `models/gemini-2.5-flash` |
+| Embeddings | Google Gemini `models/gemini-embedding-001` (3072 dims) |
+| Vector DB | Pinecone Starter |
+| Database + chat memory | Supabase Free |
+| SMS | Twilio trial |
+| Alerts | Slack Free |
+| E-mail | Gmail SMTP |
+| Automation | n8n Cloud trial or self-hosted n8n |
+
+## 11. Limitations
+
+Fake data only; Gemini free-tier rate limits (a few requests per minute; one chat turn can use several calls, so wait a few seconds between test questions); the Gemini free tier may use prompts to improve Google products (fine here because all data is fake); a single Pinecone index with metadata filters (no namespaces); no authentication on the
 public chat (anyone with the link can ask about an order ID); Twilio trial can only SMS verified numbers.
 See the report for details and future scope (inventory agent + supervisor, Flowise version, local Ollama
 model).
