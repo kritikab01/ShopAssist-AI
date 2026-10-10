@@ -166,6 +166,47 @@ else:
                 todo.append("n8n cannot reach Ollama. If n8n runs in Docker: n8n -> Credentials -> Ollama account -> "
                             "Base URL = http://host.docker.internal:11434 -> Save. Otherwise make sure the Ollama app is open.")
 
+    # ---------------------------------------------------------------- 4b. webhook / chat address
+    # The editor chat and the public chat send messages to n8n's WEBHOOK address. If n8n runs on a
+    # different port than it thinks (e.g. Docker -p 5679:5678 without WEBHOOK_URL), chat messages go
+    # to the wrong port: "Error: Failed to receive response" and nothing in the Logs panel.
+    port = n8n.rsplit(":", 1)[-1].strip("/") if n8n.count(":") >= 2 else "80"
+    found = False
+    dps = subprocess.run(["docker", "ps", "--format", "{{.Names}}|{{.Image}}|{{.Ports}}"],
+                         capture_output=True, text=True).stdout if subprocess.run(
+                             ["which", "docker"], capture_output=True).returncode == 0 else ""
+    for row in dps.splitlines():
+        name, image, ports = (row.split("|") + ["", ""])[:3]
+        if "n8n" not in image.lower() and "n8n" not in name.lower():
+            continue
+        envs = subprocess.run(["docker", "inspect", "-f", "{{range .Config.Env}}{{println .}}{{end}}", name],
+                              capture_output=True, text=True).stdout.splitlines()
+        hook = next((e.split("=", 1)[1] for e in envs if e.startswith("WEBHOOK_URL=")), "")
+        if f":{port}->" not in ports:
+            continue
+        found = True
+        print(f"   n8n runs in Docker container '{name}' ({ports.strip()}); WEBHOOK_URL={hook or '(not set)'}")
+        if f":{port}" not in hook:
+            todo.append(f"Chat messages go to the wrong port. Restart the n8n container '{name}' with "
+                        f"-e WEBHOOK_URL=http://localhost:{port}/  (see README > Troubleshooting > Failed to receive response)")
+    if not found:
+        ps = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True).stdout
+        for line in ps.splitlines():
+            pid, _, cmd = line.strip().partition(" ")
+            if "n8n" in cmd and ("start" in cmd or cmd.rstrip().endswith("n8n")) and "doctor.py" not in cmd:
+                env = subprocess.run(["ps", "eww", "-p", pid], capture_output=True, text=True).stdout
+                want = {k: (env.split(f" {k}=", 1)[1].split(" ", 1)[0] if f" {k}=" in env else "")
+                        for k in ("N8N_PORT", "WEBHOOK_URL")}
+                print(f"   n8n process {pid}: N8N_PORT={want['N8N_PORT'] or '(not set)'}, "
+                      f"WEBHOOK_URL={want['WEBHOOK_URL'] or '(not set)'}")
+                if want["WEBHOOK_URL"] and f":{port}" not in want["WEBHOOK_URL"]:
+                    todo.append(f"WEBHOOK_URL points to another port. Start n8n with WEBHOOK_URL=http://localhost:{port}/")
+                elif not want["WEBHOOK_URL"] and want["N8N_PORT"] and want["N8N_PORT"] != port:
+                    todo.append(f"Start n8n with N8N_PORT={port} (or WEBHOOK_URL=http://localhost:{port}/)")
+                break
+    print("   check by hand: double-click 'Public Chat (UrbanThread)' in workflow 03 - its Chat URL must start "
+          f"with http://localhost:{port}/")
+
     # ---------------------------------------------------------------- 5. recent errors
     print("\n5) Last failed n8n runs (newest first)")
     st, ex = http("GET", f"{n8n}/api/v1/executions?status=error&limit=5&includeData=true", H, timeout=30)
