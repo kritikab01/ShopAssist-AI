@@ -1,10 +1,10 @@
 # ShopAssist-AI
 
-**Agentic RAG customer-support agent for an online clothing store, built with n8n, Google Gemini, Pinecone,
+**Agentic RAG customer-support agent for an online clothing store, built with n8n, Ollama (local AI), Pinecone,
 Supabase Postgres, Twilio, Slack and Gmail SMTP.**
 
-All services used are free tiers; no credit card needed.
-(n8n Cloud is a free 14-day trial; to keep it free afterwards, self-host n8n Community Edition with Docker.)
+All services used are free tiers or run locally; no credit card needed.
+(n8n runs self-hosted on your computer; the AI models run locally with Ollama.)
 
 Individual capstone – *Agentic AI for Business Automation*.
 All data (brand, customers, orders, phone numbers, policies) is **fictional**.
@@ -42,7 +42,7 @@ flowchart LR
     W01 -- "embeddings<br/>source=faq" --> PC[("Pinecone<br/>index: shopassist")]
     W02 -- "embeddings<br/>source=website, url" --> PC
 
-    C(["Customer"]) <--> CHAT["03 Public Chat<br/>ShopAssist AI Agent<br/>Gemini 2.5 Flash"]
+    C(["Customer"]) <--> CHAT["03 Public Chat<br/>ShopAssist AI Agent<br/>Ollama qwen2.5:3b"]
     CHAT <-->|"faq_knowledge / website_knowledge"| PC
     CHAT <-->|"order_lookup"| PG[("Supabase Postgres<br/>orders · tickets · chat memory")]
     CHAT -->|"escalate_to_human"| W04["04 Escalation sub-workflow<br/>Structured Output ticket"]
@@ -64,53 +64,76 @@ database/    schema.sql (orders, tickets, chat memory) · seed.sql (10 fake orde
 data/        store_faq.md + store_faq.pdf · urls.txt · pages/*.html (fake web pages to scrape)
 prompts/     agent_system_prompt.md · ticket_schema.json
 docs/        course_mapping.md · test_questions.md · report.md
-scripts/     make_faq_pdf.py (md → pdf) · build_workflows.py (regenerates workflows/*.json)
+scripts/     build_workflows.py (regenerates workflows/*.json) · import_to_n8n.py · setup_pinecone.py ·
+             verify_setup.py (read-only checks) · make_faq_pdf.py (md → pdf)
 .env.example credential checklist (placeholders only)
 ```
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| `01_ingest_faq_pdf.json` | Manual | Download FAQ PDF → Default Data Loader + Recursive splitter (1000/200) → Gemini embeddings → Pinecone, `source=faq` |
+| `01_ingest_faq_pdf.json` | Manual | Download FAQ PDF → Default Data Loader + Recursive splitter (1000/200) → Ollama embeddings (768) → Pinecone, `source=faq` |
 | `02_scrape_and_summarize.json` | Manual | Read `urls.txt` → HTTP Request each page → HTML extract → LLM summary → embeddings → Pinecone, `source=website`, `url` |
 | `03_support_agent_chat.json` | Public Chat | Tools Agent + Postgres Chat Memory + tools `faq_knowledge`, `website_knowledge`, `order_lookup`, `escalate_to_human` |
 | `04_escalation_subworkflow.json` | Called by 03 | LLM + Structured Output Parser → `tickets` insert → Slack → Twilio SMS → SMTP e-mail → returns ticket ID |
 | `05_order_update_webhook.json` | Webhook POST | Update order status → if `delayed`, SMS the customer → JSON response |
 
-## 5. Credentials you need (all free, no credit card)
+## 5. Accounts and credentials (all free, no credit card)
 
-| n8n credential type | Used in | How to get it |
-|---------------------|---------|---------------|
-| **Google Gemini (PaLM) API** | 01–04 | aistudio.google.com → *Get API key* → Create API key (free, no card). In n8n the credential is called *Google Gemini(PaLM) Api*; leave Host as default |
-| **Pinecone** | 01–03 | app.pinecone.io → API keys |
-| **Postgres** | 03–05 | Supabase → Project Settings → Database → *Connection pooler* (Session mode, port 5432), SSL on |
+| What | Used in | How to get it |
+|------|---------|---------------|
+| **Ollama** (local AI, no key) | 01–04 | Install from **ollama.com**, open the app, then `ollama pull qwen2.5:3b` and `ollama pull nomic-embed-text`. The n8n credential is created for you by `scripts/import_to_n8n.py`. |
+| **Pinecone** | 01–03 | app.pinecone.io → API keys. Index `shopassist`, **768** dims, cosine (`scripts/setup_pinecone.py` creates it). |
+| **Postgres** | 03–05 | Supabase → **Connect** → *Session pooler*: host, port 5432, database `postgres`, user `postgres.<project-ref>`, password; SSL on |
 | **Slack API** | 04 | api.slack.com/apps → create app → Bot scopes `chat:write`, `channels:read` → install → Bot token `xoxb-…` |
-| **Twilio API** | 04, 05 | twilio.com/console → Account SID + Auth Token; buy/claim a trial number; verify your own phone |
+| **Twilio API** | 04, 05 | twilio.com/console → Account SID + Auth Token; claim a trial number; verify your own phone |
 | **SMTP** | 04 | Gmail: host `smtp.gmail.com`, port 465, SSL, user = your Gmail, password = **App Password** |
 
-See `.env.example` for the full checklist. **Never commit real keys.**
+Secrets go only into n8n and your local `.env` (git-ignored; template `.env.example`). **Never commit or share real keys.**
 
-## 6. Setup (≈ 60–90 minutes)
+Why Ollama? The project first used Google Gemini's free tier, but Google refused API access for the
+student's Google projects ("403 project denied"). Ollama runs the models on your own computer: free,
+no API key, no rate limits, and nothing that can be blocked.
 
-1. **Pinecone** – create index `shopassist`, dimension **3072**, metric **cosine** (serverless, free Starter plan; AWS us-east-1).
-   3072 must match `gemini-embedding-001`; an index with any other dimension will reject the vectors.
+## 6. Setup (≈ 60 minutes, self-hosted n8n on your computer)
+
+1. **Ollama** – install from ollama.com, open the app, then in Terminal:
+   `ollama pull qwen2.5:3b` and `ollama pull nomic-embed-text` (≈ 2.5 GB). With 16 GB RAM or more you can
+   use `qwen2.5:7b` for better answers (change `CHAT_MODEL` in `scripts/build_workflows.py`).
 2. **Supabase** – new project → SQL Editor → run `database/schema.sql`, then `database/seed.sql`.
    For the SMS demo, change one order's `phone` to your Twilio-verified number.
-3. **Slack** – create channel `#support-escalations`, create the bot, `/invite @YourBot` in the channel.
-4. **GitHub** – keep this repo **public** (workflows 01/02 download `data/` files from
-   `raw.githubusercontent.com/.../main/...`). If your branch is not merged into `main` yet, either merge it
-   or change `main` in the URLs (HTTP Request nodes and `data/urls.txt`) to your branch name.
-5. **n8n Cloud** – create the 6 credentials (section 5).
-6. **Import workflows** – in n8n: *Overview → Create workflow → ⋯ menu → Import from File*, one file at a
-   time, in this order: **04 → 03 → 01 → 02 → 05**. In each workflow, open every node with a warning
-   triangle and select your credential.
-7. **Link 03 → 04** – open workflow 04, copy the ID from the browser URL (`/workflow/<ID>`), then in
-   workflow 03 open the `escalate_to_human` node and select workflow 04 in *Workflow* (or paste the ID).
-   Save workflow 04 (it must be saved, it does not need to be active).
-8. **Edit placeholders** – Twilio *From* number in 04 and 05; *From/To e-mail* in 04.
-9. **Load knowledge** – open 01 → *Test workflow*; open 02 → *Test workflow*. Check Pinecone shows
-   vectors (≈ 6–10 FAQ chunks + 4 page summaries). Run each only once (re-running duplicates vectors).
-10. **Go live** – activate workflow 03 (and 05). Open the Chat Trigger node → copy the **Chat URL**.
+3. **`.env`** – `cp .env.example .env`, fill in `N8N_API_KEY` (n8n → Settings → n8n API), `PINECONE_API_KEY`
+   and the `POSTGRES_*` values.
+4. **Pinecone index** – `python3 scripts/setup_pinecone.py` (creates `shopassist`, 768 dims, cosine; if an
+   index with another size exists it asks before recreating it).
+5. **GitHub** – keep this repo **public**; workflows 01/02 download `data/` files from
+   `raw.githubusercontent.com/.../main/...` (or change `main` in those URLs and `data/urls.txt`).
+6. **n8n credentials** – create **Pinecone** and **Postgres** credentials in n8n (Credentials → Create).
+7. **Import workflows** – `set -a; source .env; set +a; python3 scripts/import_to_n8n.py`. It creates or
+   updates all 5 workflows, creates the **Ollama** credential, creates *placeholder* Slack/Twilio/SMTP
+   credentials (so 04/05 can be published before Part B), puts your only credential of each type on every
+   node, and links 03 → 04. Re-running it after `git pull` updates the workflows and keeps your credentials.
+8. **Check** – `pip3 install pg8000` then `python3 scripts/verify_setup.py` (read-only). Continue when it says
+   *All checks passed*.
+9. **Load knowledge** – in n8n open 01 → *Execute workflow*, then 02 → *Execute workflow* (once each;
+   re-running duplicates vectors). Pinecone should then hold ≈ 10 records.
+10. **Go live** – n8n 2.x: **Publish** workflow **04** first, then **03** and **05**. The chat calls the
+    *published* version of 04. After any later edit, publish again. Open the Chat Trigger → copy the **Chat URL**.
 11. **Test** – go through `docs/test_questions.md` and take screenshots for `docs/report.md`.
+12. **Part B (real notifications)** – replace the placeholder Slack/Twilio/SMTP credentials with real ones, set
+    the Twilio *From* number in 04 and 05 and the *From/To e-mail* in 04, then publish 04 and 05 again.
+
+### Troubleshooting
+
+| Error in n8n | Cause | Fix |
+|--------------|-------|-----|
+| *Mime type doesn't match selected loader* (01) | GitHub serves the PDF as `application/octet-stream` | Fixed by the **Set MIME Type to PDF** node. |
+| *Vector dimension X does not match the dimension of the index* | Pinecone index has the wrong size | `python3 scripts/setup_pinecone.py` (768). |
+| *fetch failed* / *ECONNREFUSED 11434* on an Ollama node | Ollama app not running, or n8n runs in Docker | Open the Ollama app. If n8n runs in Docker, set the Ollama credential's Base URL to `http://host.docker.internal:11434`. |
+| *model "qwen2.5:3b" not found* | Model not downloaded | `ollama pull qwen2.5:3b` (and `nomic-embed-text`). |
+| Chat answers are slow | Local model on a laptop | Normal for the first answer (model loading, ~30 s); later answers are faster. |
+| *Workflow is not active and cannot be executed* (during chat) | Workflow 04 is not published | Publish workflow 04. |
+| *Cannot publish workflow … Missing required credential* | A node has no credential | Run the import script again (creates placeholders), or select the credential in the node. |
+| Twilio *unverified number* | Trial account | Verify the phone in the Twilio console or use your own number in `seed.sql`. |
 
 ## 7. Demo questions
 
@@ -154,21 +177,20 @@ python scripts/build_workflows.py   # prompts/* -> workflows/*.json
 
 | Purpose | Service (free tier) |
 |---|---|
-| Chat LLM | Google Gemini `models/gemini-2.5-flash` |
-| Embeddings | Google Gemini `models/gemini-embedding-001` (3072 dims) |
+| Chat LLM | Ollama `qwen2.5:3b` (local, tool calling) |
+| Embeddings | Ollama `nomic-embed-text` (768 dims, local) |
 | Vector DB | Pinecone Starter |
 | Database + chat memory | Supabase Free |
 | SMS | Twilio trial |
 | Alerts | Slack Free |
 | E-mail | Gmail SMTP |
-| Automation | n8n Cloud trial or self-hosted n8n |
+| Automation | self-hosted n8n (Community Edition) |
 
 ## 11. Limitations
 
-Fake data only; Gemini free-tier rate limits (a few requests per minute; one chat turn can use several calls, so wait a few seconds between test questions); the Gemini free tier may use prompts to improve Google products (fine here because all data is fake); a single Pinecone index with metadata filters (no namespaces); no authentication on the
+Fake data only; a small local model (3B parameters) is slower and less accurate than large cloud models, and the chat only works while your computer, n8n and Ollama are running; a single Pinecone index with metadata filters (no namespaces); no authentication on the
 public chat (anyone with the link can ask about an order ID); Twilio trial can only SMS verified numbers.
-See the report for details and future scope (inventory agent + supervisor, Flowise version, local Ollama
-model).
+See the report for details and future scope (inventory agent + supervisor, Flowise version, larger models).
 
 ## License
 

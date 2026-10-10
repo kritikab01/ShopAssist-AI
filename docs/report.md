@@ -34,9 +34,9 @@ _(Paste the Mermaid diagram from the README here, or a screenshot of it rendered
 | Layer | Technology |
 |-------|-----------|
 | Orchestration / agent | n8n Cloud – AI Agent (Tools Agent) |
-| LLM | Google Gemini 2.5 Flash (`models/gemini-2.5-flash`, free tier) |
-| Embeddings | Google Gemini `models/gemini-embedding-001` (3072 dims, free tier) |
-| Vector DB | Pinecone index `shopassist` (3072 dims, cosine), metadata `source`, `url`, `title` |
+| LLM | Ollama `qwen2.5:3b`, running locally (free, no API key, supports tool calling) |
+| Embeddings | Ollama `nomic-embed-text` (768 dims, local) |
+| Vector DB | Pinecone index `shopassist` (768 dims, cosine), metadata `source`, `url`, `title` |
 | Database + memory | Supabase Postgres (`orders`, `tickets`, `n8n_chat_histories`) |
 | Notifications | Slack API, Twilio SMS, Gmail SMTP |
 | Interface | n8n public hosted chat; webhook for the order system |
@@ -45,13 +45,13 @@ _(Paste the Mermaid diagram from the README here, or a screenshot of it rendered
 
 ### 4.1 Workflow 01 – Ingest FAQ PDF
 Manual trigger → HTTP Request downloads `store_faq.pdf` → **Default Data Loader** (PDF) with metadata
-`source=faq` → **Recursive Character Text Splitter** (chunk 1000, overlap 200) → **Gemini embeddings** →
+`source=faq` → **Recursive Character Text Splitter** (chunk 1000, overlap 200) → **Ollama embeddings** →
 **Pinecone insert**. Overlap keeps sentences that cross chunk borders searchable.
 _Screenshot: workflow canvas + Pinecone record count._
 
 ### 4.2 Workflow 02 – Scrape and summarize web pages
 Manual trigger → read `urls.txt` → **Code** node creates one item per URL → **HTTP Request** fetches each
-page → **HTML Extract** keeps body text without nav/footer → **Basic LLM Chain** (Gemini 2.5 Flash,
+page → **HTML Extract** keeps body text without nav/footer → **Basic LLM Chain** (Ollama `qwen2.5:3b`,
 temperature 0) summarizes each page into factual bullets → **Set** adds `url` and `title` → Pinecone insert
 with metadata `source=website`, `url`, `title`. Summaries are shorter and cleaner than raw HTML, which
 improves retrieval and lets the agent cite the page URL.
@@ -75,7 +75,9 @@ _Screenshot: chat conversation + agent execution log showing tool calls._
 ### 4.4 Workflow 04 – Escalation sub-workflow
 **Execute Workflow Trigger** receives `customer_name, phone, order_id, reason, conversation_summary` →
 **LLM chain + Structured Output Parser** produces a ticket matching `prompts/ticket_schema.json`
-(`issue_type`, `sentiment`, `priority` are enums) → **Postgres insert** into `tickets` (returns
+(`issue_type`, `sentiment`, `priority` are enums; the Ollama model runs in JSON mode) → **Normalize Ticket**
+(a Code node that fills any field the small model missed from the agent's inputs, so a ticket is always
+created) → **Postgres insert** into `tickets` (returns
 `TKT-000N`) → **Slack** message to `#support-escalations` → **Twilio SMS** to the customer →
 **SMTP e-mail** to support → **Set** node returns the ticket ID to the agent. Notification nodes continue
 on error so a missing phone number never breaks the chat.
@@ -133,7 +135,8 @@ Test plan: `docs/test_questions.md` (8 chat tests + 2 webhook tests).
 - Sentiment / anger detection depends on the LLM and may miss sarcasm or Hinglish.
 - Twilio trial sends only to verified numbers and adds a trial prefix to messages.
 - No evaluation dataset or automated accuracy measurement; testing is manual.
-- Gemini free-tier rate limits: one chat turn can make several model calls, so fast repeated tests may get a 429 error.
+- A small local model (3B parameters) is slower and makes more mistakes than large cloud models; answers depend on the laptop's speed.
+- The chat works only while the computer, n8n and Ollama are running (self-hosted).
 - English only.
 
 ## 8. Future scope
@@ -142,7 +145,7 @@ Test plan: `docs/test_questions.md` (8 chat tests + 2 webhook tests).
    agent or a new inventory agent that checks stock in Postgres, drafts a purchase order (structured
    output), asks for approval in Slack, then texts the supplier via Twilio.
 2. **Flowise version:** rebuild the same agent in Flowise to compare low-code agent builders.
-3. **Local model with Ollama:** run Llama/Qwen locally for privacy and zero API cost; compare quality and latency against Gemini 2.5 Flash.
+3. **Bigger or cloud models:** compare the local `qwen2.5:3b` with `qwen2.5:7b` or a hosted model (Gemini, GPT) for answer quality and speed.
 4. WhatsApp channel via Twilio WhatsApp API; Hindi and Hinglish support.
 5. OTP verification before showing order details; automatic re-scraping on a schedule.
 6. Dashboard of ticket volume, sentiment and resolution time.

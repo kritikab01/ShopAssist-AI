@@ -52,7 +52,7 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "=You are a support team lead at UrbanThread (Indian online clothing store). Create a support ticket from this escalation. Phone numbers must be in E.164 format: if a 10-digit Indian number is given, add +91. Priority is high if the customer is angry, the refund is above Rs 5,000, the item is damaged or there is a payment problem.\n\nCustomer name: {{ $json.customer_name }}\nPhone: {{ $json.phone }}\nOrder ID: {{ $json.order_id }}\nReason for escalation: {{ $json.reason }}\nConversation summary: {{ $json.conversation_summary }}",
+        "text": "=You are a support team lead at UrbanThread (Indian online clothing store). Create a support ticket from this escalation. Phone numbers must be in E.164 format: if a 10-digit Indian number is given, add +91. Priority is high if the customer is angry, the refund is above Rs 5,000, the item is damaged or there is a payment problem.\n\nCustomer name: {{ $json.customer_name }}\nPhone: {{ $json.phone }}\nOrder ID: {{ $json.order_id }}\nReason for escalation: {{ $json.reason }}\nConversation summary: {{ $json.conversation_summary }}\n\nAnswer with ONLY this JSON shape (fill every field): {\"output\": {\"customer_name\": \"...\", \"phone\": \"...\", \"order_id\": \"...\", \"issue_type\": \"refund|return|delivery|damaged_item|payment|size|other\", \"sentiment\": \"positive|neutral|negative|angry\", \"priority\": \"low|medium|high\", \"summary\": \"...\", \"suggested_action\": \"...\"}}",
         "hasOutputParser": true
       },
       "id": "28685e0c-d32f-5f11-b6c0-f3a7e7b47f9a",
@@ -62,27 +62,31 @@
       "position": [
         220,
         0
-      ]
+      ],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "modelName": "models/gemini-2.5-flash",
+        "model": "qwen2.5:3b",
         "options": {
-          "temperature": 0
+          "temperature": 0,
+          "numCtx": 8192,
+          "think": false,
+          "format": "json"
         }
       },
-      "id": "e1515801-c957-5829-acbf-15fe672d77ef",
-      "name": "Gemini Chat Model",
-      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "id": "3f69344d-3c1c-5857-b9ff-93e375344e6b",
+      "name": "Ollama Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
       "typeVersion": 1,
       "position": [
         160,
         240
       ],
       "credentials": {
-        "googlePalmApi": {
-          "id": "REPLACE_ME_gemini",
-          "name": "Google Gemini account"
+        "ollamaApi": {
+          "id": "REPLACE_ME_ollama",
+          "name": "Ollama account"
         }
       }
     },
@@ -102,6 +106,19 @@
     },
     {
       "parameters": {
+        "jsCode": "// Take the AI ticket; fill anything missing from what the agent sent.\nconst t = $json.output || {};\nconst inp = $('When Called by Agent').first().json;\nconst reason = String(inp.reason || '').toLowerCase();\nlet phone = String(t.phone || inp.phone || '').replace(/[^0-9+]/g, '');\nif (/^[0-9]{10}$/.test(phone)) phone = '+91' + phone;  // Indian 10-digit number -> E.164\nreturn [{ json: { output: {\n  customer_name: t.customer_name || inp.customer_name || 'Unknown',\n  phone,\n  order_id: String(t.order_id || inp.order_id || '').toUpperCase(),\n  issue_type: t.issue_type || (reason.includes('refund') ? 'refund' : 'other'),\n  sentiment: t.sentiment || (reason.includes('angry') ? 'angry' : 'neutral'),\n  priority: t.priority || 'high',\n  summary: t.summary || inp.conversation_summary || inp.reason || '',\n  suggested_action: t.suggested_action || 'Contact the customer and review the chat.',\n} } }];\n"
+      },
+      "id": "c3d084a6-d00e-517e-98b3-e32473490163",
+      "name": "Normalize Ticket (fallback)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
         "operation": "executeQuery",
         "query": "INSERT INTO tickets (customer_name, phone, order_id, issue_type, sentiment, priority,\n                     summary, suggested_action)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8)\nRETURNING ticket_id, priority, created_at;",
         "options": {
@@ -113,7 +130,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        560,
+        660,
         0
       ],
       "credentials": {
@@ -131,7 +148,7 @@
           "value": "#support-escalations",
           "mode": "name"
         },
-        "text": "=:rotating_light: *New escalation {{ $json.ticket_id }}* – priority *{{ $('Build Ticket (Structured Output)').item.json.output.priority }}*\n*Customer:* {{ $('Build Ticket (Structured Output)').item.json.output.customer_name }} ({{ $('Build Ticket (Structured Output)').item.json.output.phone || 'no phone' }})\n*Order:* {{ $('Build Ticket (Structured Output)').item.json.output.order_id || '-' }}  |  *Issue:* {{ $('Build Ticket (Structured Output)').item.json.output.issue_type }}  |  *Sentiment:* {{ $('Build Ticket (Structured Output)').item.json.output.sentiment }}\n*Summary:* {{ $('Build Ticket (Structured Output)').item.json.output.summary }}\n*Suggested action:* {{ $('Build Ticket (Structured Output)').item.json.output.suggested_action }}",
+        "text": "=:rotating_light: *New escalation {{ $json.ticket_id }}* – priority *{{ $('Normalize Ticket (fallback)').item.json.output.priority }}*\n*Customer:* {{ $('Normalize Ticket (fallback)').item.json.output.customer_name }} ({{ $('Normalize Ticket (fallback)').item.json.output.phone || 'no phone' }})\n*Order:* {{ $('Normalize Ticket (fallback)').item.json.output.order_id || '-' }}  |  *Issue:* {{ $('Normalize Ticket (fallback)').item.json.output.issue_type }}  |  *Sentiment:* {{ $('Normalize Ticket (fallback)').item.json.output.sentiment }}\n*Summary:* {{ $('Normalize Ticket (fallback)').item.json.output.summary }}\n*Suggested action:* {{ $('Normalize Ticket (fallback)').item.json.output.suggested_action }}",
         "otherOptions": {}
       },
       "id": "2f734d66-1441-5c96-9c8f-9739cdb17813",
@@ -139,7 +156,7 @@
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2.3,
       "position": [
-        780,
+        880,
         0
       ],
       "credentials": {
@@ -153,8 +170,8 @@
     {
       "parameters": {
         "from": "+10000000000",
-        "to": "={{ $('Build Ticket (Structured Output)').item.json.output.phone }}",
-        "message": "=Hi {{ $('Build Ticket (Structured Output)').item.json.output.customer_name }}, this is UrbanThread support. We have created ticket {{ $('Save Ticket in Postgres').item.json.ticket_id }} for your issue. A team member will contact you within 4 business hours.",
+        "to": "={{ $('Normalize Ticket (fallback)').item.json.output.phone }}",
+        "message": "=Hi {{ $('Normalize Ticket (fallback)').item.json.output.customer_name }}, this is UrbanThread support. We have created ticket {{ $('Save Ticket in Postgres').item.json.ticket_id }} for your issue. A team member will contact you within 4 business hours.",
         "options": {}
       },
       "id": "c7425f27-eea4-5238-bd73-18c5980ca6e4",
@@ -162,7 +179,7 @@
       "type": "n8n-nodes-base.twilio",
       "typeVersion": 1,
       "position": [
-        1000,
+        1100,
         0
       ],
       "credentials": {
@@ -177,9 +194,9 @@
       "parameters": {
         "fromEmail": "your.gmail@gmail.com",
         "toEmail": "support@urbanthread.example",
-        "subject": "=[{{ $('Build Ticket (Structured Output)').item.json.output.priority }}] Escalation {{ $('Save Ticket in Postgres').item.json.ticket_id }} – {{ $('Build Ticket (Structured Output)').item.json.output.issue_type }}",
+        "subject": "=[{{ $('Normalize Ticket (fallback)').item.json.output.priority }}] Escalation {{ $('Save Ticket in Postgres').item.json.ticket_id }} – {{ $('Normalize Ticket (fallback)').item.json.output.issue_type }}",
         "emailFormat": "text",
-        "text": "=New ShopAssist escalation\n\nTicket: {{ $('Save Ticket in Postgres').item.json.ticket_id }}\nCustomer: {{ $('Build Ticket (Structured Output)').item.json.output.customer_name }}\nPhone: {{ $('Build Ticket (Structured Output)').item.json.output.phone }}\nOrder ID: {{ $('Build Ticket (Structured Output)').item.json.output.order_id }}\nIssue type: {{ $('Build Ticket (Structured Output)').item.json.output.issue_type }}\nSentiment: {{ $('Build Ticket (Structured Output)').item.json.output.sentiment }}\nPriority: {{ $('Build Ticket (Structured Output)').item.json.output.priority }}\n\nSummary:\n{{ $('Build Ticket (Structured Output)').item.json.output.summary }}\n\nSuggested action:\n{{ $('Build Ticket (Structured Output)').item.json.output.suggested_action }}\n",
+        "text": "=New ShopAssist escalation\n\nTicket: {{ $('Save Ticket in Postgres').item.json.ticket_id }}\nCustomer: {{ $('Normalize Ticket (fallback)').item.json.output.customer_name }}\nPhone: {{ $('Normalize Ticket (fallback)').item.json.output.phone }}\nOrder ID: {{ $('Normalize Ticket (fallback)').item.json.output.order_id }}\nIssue type: {{ $('Normalize Ticket (fallback)').item.json.output.issue_type }}\nSentiment: {{ $('Normalize Ticket (fallback)').item.json.output.sentiment }}\nPriority: {{ $('Normalize Ticket (fallback)').item.json.output.priority }}\n\nSummary:\n{{ $('Normalize Ticket (fallback)').item.json.output.summary }}\n\nSuggested action:\n{{ $('Normalize Ticket (fallback)').item.json.output.suggested_action }}\n",
         "options": {}
       },
       "id": "f7a9afcd-d25b-5caf-b2ab-967ba7478275",
@@ -187,7 +204,7 @@
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        1220,
+        1320,
         0
       ],
       "credentials": {
@@ -212,7 +229,7 @@
               "id": "r2",
               "name": "priority",
               "type": "string",
-              "value": "={{ $('Build Ticket (Structured Output)').item.json.output.priority }}"
+              "value": "={{ $('Normalize Ticket (fallback)').item.json.output.priority }}"
             },
             {
               "id": "r3",
@@ -229,7 +246,7 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        1440,
+        1540,
         0
       ]
     },
@@ -244,7 +261,7 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        1660,
+        1760,
         -40
       ]
     }
@@ -262,6 +279,17 @@
       ]
     },
     "Build Ticket (Structured Output)": {
+      "main": [
+        [
+          {
+            "node": "Normalize Ticket (fallback)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Ticket (fallback)": {
       "main": [
         [
           {
@@ -316,7 +344,7 @@
         ]
       ]
     },
-    "Gemini Chat Model": {
+    "Ollama Chat Model": {
       "ai_languageModel": [
         [
           {

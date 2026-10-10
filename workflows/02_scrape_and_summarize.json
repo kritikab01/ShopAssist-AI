@@ -102,7 +102,7 @@
         },
         "options": {
           "trimValues": true,
-          "cleanUpText": true
+          "cleanUpText": false
         }
       },
       "id": "9e2c2d25-d6ab-5570-8384-3cb05fa5d771",
@@ -130,23 +130,25 @@
     },
     {
       "parameters": {
-        "modelName": "models/gemini-2.5-flash",
+        "model": "qwen2.5:3b",
         "options": {
-          "temperature": 0
+          "temperature": 0,
+          "numCtx": 8192,
+          "think": false
         }
       },
-      "id": "8f131f2c-f443-54f4-a959-883839751a24",
-      "name": "Gemini Chat Model",
-      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "id": "adc7acf1-c409-501f-a037-0d06e01b0337",
+      "name": "Ollama Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
       "typeVersion": 1,
       "position": [
         1000,
         220
       ],
       "credentials": {
-        "googlePalmApi": {
-          "id": "REPLACE_ME_gemini",
-          "name": "Google Gemini account"
+        "ollamaApi": {
+          "id": "REPLACE_ME_ollama",
+          "name": "Ollama account"
         }
       }
     },
@@ -212,20 +214,20 @@
     },
     {
       "parameters": {
-        "modelName": "models/gemini-embedding-001"
+        "model": "nomic-embed-text"
       },
-      "id": "fbe9d159-d76f-5b02-8850-6f49dc3a9b05",
-      "name": "Gemini Embeddings",
-      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "id": "6233f2bc-a744-54f3-b13b-8520e651b014",
+      "name": "Ollama Embeddings",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
       "typeVersion": 1,
       "position": [
         1400,
         240
       ],
       "credentials": {
-        "googlePalmApi": {
-          "id": "REPLACE_ME_gemini",
-          "name": "Google Gemini account"
+        "ollamaApi": {
+          "id": "REPLACE_ME_ollama",
+          "name": "Ollama account"
         }
       }
     },
@@ -280,7 +282,7 @@
     },
     {
       "parameters": {
-        "content": "## Step notes\n- **Read urls.txt** downloads the URL list from GitHub (one URL per line).\n- **Fetch Page HTML** runs once per URL (n8n loops over items automatically).\n- **Extract Text from HTML** keeps `<body>` text and skips nav/header/footer.\n- **Summarize Page** = Basic LLM Chain + Gemini 2.5 Flash (temperature 0).\n- **Default Data Loader** stores the summary with metadata `source=website`, `url`, `title` so the agent can cite the page.",
+        "content": "## Step notes\n- **Read urls.txt** downloads the URL list from GitHub (one URL per line).\n- **Fetch Page HTML** runs once per URL (n8n loops over items automatically).\n- **Extract Text from HTML** keeps `<body>` text and skips nav/header/footer.\n- **Summarize Page** = Basic LLM Chain + Ollama `qwen2.5:3b` (temperature 0).\n- **Default Data Loader** stores the summary with metadata `source=website`, `url`, `title` so the agent can cite the page.",
         "width": 440,
         "height": 320
       },
@@ -372,7 +374,7 @@
         ]
       ]
     },
-    "Gemini Chat Model": {
+    "Ollama Chat Model": {
       "ai_languageModel": [
         [
           {
@@ -383,7 +385,7 @@
         ]
       ]
     },
-    "Gemini Embeddings": {
+    "Ollama Embeddings": {
       "ai_embedding": [
         [
           {

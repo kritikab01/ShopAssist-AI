@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## Overview – Workflow 01\n**Goal:** load the store FAQ/policy PDF into the Pinecone index `shopassist` so the agent can search it (RAG).\n\nFlow: Manual trigger → download PDF → split into 1000-char chunks (200 overlap) → embed with Gemini `gemini-embedding-001` (3072 dims) → insert with metadata `source = faq`.\n\n**Run once** (running again adds duplicates – clear the index first).\n\nCourse: Sessions 7–9 (RAG with Pinecone), 18 (metadata).",
+        "content": "## Overview – Workflow 01\n**Goal:** load the store FAQ/policy PDF into the Pinecone index `shopassist` so the agent can search it (RAG).\n\nFlow: Manual trigger → download PDF → split into 1000-char chunks (200 overlap) → embed with Ollama `nomic-embed-text` (768 dims) → insert with metadata `source = faq`.\n\n**Run once** (running again adds duplicates – clear the index first).\n\nCourse: Sessions 7–9 (RAG with Pinecone), 18 (metadata).",
         "width": 520,
         "height": 300,
         "color": 4
@@ -50,6 +50,19 @@
     },
     {
       "parameters": {
+        "jsCode": "// raw.githubusercontent.com sends the PDF as application/octet-stream.\n// The Default Data Loader (PDF) needs application/pdf, so we relabel it.\nfor (const item of $input.all()) {\n  item.binary.data.mimeType = 'application/pdf';\n  item.binary.data.fileExtension = 'pdf';\n}\nreturn $input.all();\n"
+      },
+      "id": "cba66412-2dff-5fa0-9d3b-11184aea2cc3",
+      "name": "Set MIME Type to PDF",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
         "mode": "insert",
         "pineconeIndex": {
           "__rl": true,
@@ -63,7 +76,7 @@
       "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
       "typeVersion": 1.3,
       "position": [
-        460,
+        680,
         0
       ],
       "credentials": {
@@ -75,20 +88,20 @@
     },
     {
       "parameters": {
-        "modelName": "models/gemini-embedding-001"
+        "model": "nomic-embed-text"
       },
-      "id": "94816f20-cda9-50a9-a2a3-9bf784a62987",
-      "name": "Gemini Embeddings",
-      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "id": "baf32b80-cc40-5a56-bb6a-375db3a63a29",
+      "name": "Ollama Embeddings",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
       "typeVersion": 1,
       "position": [
-        380,
+        600,
         240
       ],
       "credentials": {
-        "googlePalmApi": {
-          "id": "REPLACE_ME_gemini",
-          "name": "Google Gemini account"
+        "ollamaApi": {
+          "id": "REPLACE_ME_ollama",
+          "name": "Ollama account"
         }
       }
     },
@@ -117,7 +130,7 @@
       "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
       "typeVersion": 1.1,
       "position": [
-        580,
+        800,
         240
       ]
     },
@@ -132,22 +145,22 @@
       "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
       "typeVersion": 1,
       "position": [
-        660,
+        880,
         440
       ]
     },
     {
       "parameters": {
-        "content": "## Step notes\n- **Download FAQ PDF**: raw GitHub URL of `data/store_faq.pdf` (repo must be public). Alternative: replace with a *Google Drive → Download file* node.\n- **Default Data Loader** reads the binary PDF and adds metadata `source=faq` – the agent's `faq_knowledge` tool filters on it.\n- **Recursive Text Splitter**: chunk size 1000, overlap 200.\n- **Gemini Embeddings**: `gemini-embedding-001`, 3072-dim vectors; index must use the same dimension and cosine.",
+        "content": "## Step notes\n- **Download FAQ PDF**: raw GitHub URL of `data/store_faq.pdf` (repo must be public). Alternative: replace with a *Google Drive → Download file* node.\n- **Set MIME Type to PDF**: GitHub labels the file `application/octet-stream`; the PDF loader needs `application/pdf`.\n- **Default Data Loader** reads the binary PDF and adds metadata `source=faq` – the agent's `faq_knowledge` tool filters on it.\n- **Recursive Text Splitter**: chunk size 1000, overlap 200.\n- **Ollama Embeddings**: `nomic-embed-text`, 768-dim vectors; index must use the same dimension and cosine.",
         "width": 420,
-        "height": 320
+        "height": 360
       },
       "id": "83afddfe-c432-58f4-836d-91e5dd99d6ed",
       "name": "Step notes",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        860,
+        1080,
         -40
       ]
     }
@@ -168,6 +181,17 @@
       "main": [
         [
           {
+            "node": "Set MIME Type to PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set MIME Type to PDF": {
+      "main": [
+        [
+          {
             "node": "Insert into Pinecone (source=faq)",
             "type": "main",
             "index": 0
@@ -175,7 +199,7 @@
         ]
       ]
     },
-    "Gemini Embeddings": {
+    "Ollama Embeddings": {
       "ai_embedding": [
         [
           {

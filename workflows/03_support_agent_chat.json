@@ -58,23 +58,25 @@
     },
     {
       "parameters": {
-        "modelName": "models/gemini-2.5-flash",
+        "model": "qwen2.5:3b",
         "options": {
-          "temperature": 0.2
+          "temperature": 0.2,
+          "numCtx": 8192,
+          "think": false
         }
       },
-      "id": "399c3214-2ac0-53fb-97ca-8f1c32d3b46d",
-      "name": "Gemini Chat Model",
-      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "id": "dd2f85d8-07e3-52cc-8edd-18e44ff5376a",
+      "name": "Ollama Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
       "typeVersion": 1,
       "position": [
         0,
         300
       ],
       "credentials": {
-        "googlePalmApi": {
-          "id": "REPLACE_ME_gemini",
-          "name": "Google Gemini account"
+        "ollamaApi": {
+          "id": "REPLACE_ME_ollama",
+          "name": "Ollama account"
         }
       }
     },
@@ -138,20 +140,20 @@
     },
     {
       "parameters": {
-        "modelName": "models/gemini-embedding-001"
+        "model": "nomic-embed-text"
       },
-      "id": "50049dc3-7bff-5530-a487-9d5e1d697526",
-      "name": "Gemini Embeddings (faq)",
-      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "id": "45f2aa65-804a-52de-8795-37ac714b04d7",
+      "name": "Ollama Embeddings (faq)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
       "typeVersion": 1,
       "position": [
         360,
         520
       ],
       "credentials": {
-        "googlePalmApi": {
-          "id": "REPLACE_ME_gemini",
-          "name": "Google Gemini account"
+        "ollamaApi": {
+          "id": "REPLACE_ME_ollama",
+          "name": "Ollama account"
         }
       }
     },
@@ -195,20 +197,20 @@
     },
     {
       "parameters": {
-        "modelName": "models/gemini-embedding-001"
+        "model": "nomic-embed-text"
       },
-      "id": "6ad52ac8-44d1-5f51-b709-033d10739cc6",
-      "name": "Gemini Embeddings (website)",
-      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "id": "d178f936-596f-5e2b-a8e5-a13261daf515",
+      "name": "Ollama Embeddings (website)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
       "typeVersion": 1,
       "position": [
         560,
         520
       ],
       "credentials": {
-        "googlePalmApi": {
-          "id": "REPLACE_ME_gemini",
-          "name": "Google Gemini account"
+        "ollamaApi": {
+          "id": "REPLACE_ME_ollama",
+          "name": "Ollama account"
         }
       }
     },
@@ -239,6 +241,7 @@
     },
     {
       "parameters": {
+        "name": "escalate_to_human",
         "description": "Create a support ticket and alert the human support team (Slack, SMS, e-mail). Use when the customer is angry, wants a refund above Rs 5,000, asks for a human, or the answer is not in the knowledge bases. Returns the ticket ID to give to the customer.",
         "workflowId": {
           "__rl": true,
@@ -337,7 +340,7 @@
     }
   ],
   "connections": {
-    "Gemini Embeddings (faq)": {
+    "Ollama Embeddings (faq)": {
       "ai_embedding": [
         [
           {
@@ -359,7 +362,7 @@
         ]
       ]
     },
-    "Gemini Embeddings (website)": {
+    "Ollama Embeddings (website)": {
       "ai_embedding": [
         [
           {
@@ -414,7 +417,7 @@
         ]
       ]
     },
-    "Gemini Chat Model": {
+    "Ollama Chat Model": {
       "ai_languageModel": [
         [
           {
