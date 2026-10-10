@@ -99,6 +99,11 @@ else:
         if k == "PINECONE_API_KEY" and " " in v:
             ok, extra = False, " (contains a space - extra text after the key?)"
         print(f"   {k:20} {'set' if ok else 'MISSING / placeholder'}{extra}")
+    for n, line in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+        if "=" in line and not line.strip().startswith("#"):
+            val = line.split("=", 1)[1].split(" #")[0].strip()
+            if " " in val and not (val.startswith('"') or val.startswith("'")):
+                print(f"   line {n} ({line.split('=')[0].strip()}): value contains a space - remove extra words after it")
     if "GOOGLE_GEMINI_API_KEY" in ENV:
         print("   (GOOGLE_GEMINI_API_KEY is no longer used - you can delete that line)")
 
@@ -145,8 +150,7 @@ else:
         ai = "OLLAMA" if types & {"lmChatOllama", "embeddingsOllama"} else (
             "GEMINI (old!)" if types & {"lmChatGoogleGemini", "embeddingsGoogleGemini"} else "-")
         if ai.startswith("GEMINI"):
-            todo.append("n8n still has the OLD Gemini workflows. Run:  set -a; source .env; set +a; "
-                        "python3 scripts/import_to_n8n.py")
+            todo.append("n8n still has the OLD Gemini workflows. Run:  python3 scripts/import_to_n8n.py")
         missing = [n["name"] for n in w["nodes"] if not n.get("credentials") and n["type"].split(".")[-1] in
                    ("vectorStorePinecone", "embeddingsOllama", "lmChatOllama", "postgres", "postgresTool",
                     "memoryPostgresChat", "slack", "twilio", "emailSend")]

@@ -3,9 +3,7 @@
 Run this ON YOUR OWN COMPUTER (where n8n runs), from the repo folder:
 
     git pull                        # get the latest workflow files first
-    export N8N_URL=http://localhost:5679
-    export N8N_API_KEY=...          # n8n -> Settings -> n8n API -> Create an API key
-    python3 scripts/import_to_n8n.py
+    python3 scripts/import_to_n8n.py     # reads N8N_URL / N8N_API_KEY / OLLAMA_URL from .env
 
 What it does:
   1. workflow 04 (escalation) first, then 03, 01, 02, 05;
@@ -29,6 +27,14 @@ from pathlib import Path
 WF_DIR = Path(__file__).resolve().parent.parent / "workflows"
 ORDER = ["04_escalation_subworkflow.json", "03_support_agent_chat.json",
          "01_ingest_faq_pdf.json", "02_scrape_and_summarize.json", "05_order_update_webhook.json"]
+
+# Read .env from the repo folder (no `source .env` needed; values with spaces are fine).
+_env = Path(__file__).resolve().parent.parent / ".env"
+if _env.exists():
+    for _line in _env.read_text(encoding="utf-8", errors="replace").splitlines():
+        if "=" in _line and not _line.strip().startswith("#"):
+            _k, _v = _line.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.split(" #")[0].strip().strip('"').strip("'"))
 
 base = os.environ.get("N8N_URL", "http://localhost:5679").rstrip("/")
 key = os.environ.get("N8N_API_KEY")

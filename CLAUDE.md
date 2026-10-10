@@ -28,7 +28,7 @@ Capstone project: n8n customer-support agent for a fictional store (UrbanThread)
 
 ## Next steps for the user
 1. Install Ollama, `ollama pull qwen2.5:3b`, `ollama pull nomic-embed-text`.
-2. `python3 scripts/setup_pinecone.py`, then `set -a; source .env; set +a; python3 scripts/import_to_n8n.py`.
+2. `python3 scripts/setup_pinecone.py`, then `python3 scripts/import_to_n8n.py`.
 3. `python3 scripts/verify_setup.py` -> all checks pass.
 4. Run 01 then 02 once each; publish 04, then 03 and 05; test with docs/test_questions.md.
 5. Part B: real Slack, Twilio, Gmail SMTP credentials replace the placeholders; publish 04/05 again.

@@ -108,7 +108,7 @@ no API key, no rate limits, and nothing that can be blocked.
 5. **GitHub** – keep this repo **public**; workflows 01/02 download `data/` files from
    `raw.githubusercontent.com/.../main/...` (or change `main` in those URLs and `data/urls.txt`).
 6. **n8n credentials** – create **Pinecone** and **Postgres** credentials in n8n (Credentials → Create).
-7. **Import workflows** – `set -a; source .env; set +a; python3 scripts/import_to_n8n.py`. It creates or
+7. **Import workflows** – `python3 scripts/import_to_n8n.py` (reads `.env` itself). It creates or
    updates all 5 workflows, creates the **Ollama** credential, creates *placeholder* Slack/Twilio/SMTP
    credentials (so 04/05 can be published before Part B), puts your only credential of each type on every
    node, and links 03 → 04. Re-running it after `git pull` updates the workflows and keeps your credentials.
