@@ -12,7 +12,8 @@ What it does:
   2. if a workflow with the same name already exists it is UPDATED in place (same ID, same URL)
      and every node keeps the credential you already selected (matched by node name);
      otherwise it is created;
-  3. puts workflow 04's ID into the `escalate_to_human` tool of workflow 03.
+  3. nodes with no credential get your credential of the right type, if you have exactly one of it;
+  4. puts workflow 04's ID into the `escalate_to_human` tool of workflow 03.
 Nothing is published/activated. Nodes that never had a credential show a warning: open them and
 select your credential. Only the Python 3 standard library is used - no pip install needed.
 """
@@ -64,6 +65,22 @@ while True:
     if not cursor:
         break
 
+# Credential type each node needs. If you have exactly ONE credential of that type in n8n,
+# nodes without a credential get it automatically (no clicking through every node).
+NEEDS = {"vectorStorePinecone": "pineconeApi", "embeddingsGoogleGemini": "googlePalmApi",
+         "lmChatGoogleGemini": "googlePalmApi", "postgres": "postgres", "postgresTool": "postgres",
+         "memoryPostgresChat": "postgres", "slack": "slackApi", "twilio": "twilioApi", "emailSend": "smtp"}
+by_type = {}
+try:
+    for c in api("GET", "/credentials?limit=100").get("data", []):
+        by_type.setdefault(c["type"], []).append({"id": c["id"], "name": c["name"]})
+except ApiError:
+    print("note: cannot list credentials with this API key; nodes keep only credentials chosen before.")
+auto = {t: cs[0] for t, cs in by_type.items() if len(cs) == 1}
+for t, cs in by_type.items():
+    if len(cs) > 1:
+        print(f"note: {len(cs)} credentials of type {t} exist - not auto-assigning; keep only one or pick in the UI.")
+
 escalation_id = None
 for filename in ORDER:
     wf = json.loads((WF_DIR / filename).read_text(encoding="utf-8"))
@@ -73,6 +90,9 @@ for filename in ORDER:
         node.pop("credentials", None)  # file placeholders point at credentials that do not exist
         if node["name"] in old_creds:
             node["credentials"] = old_creds[node["name"]]  # keep what you already selected
+        elif NEEDS.get(node["type"].split(".")[-1]) in auto:
+            ctype = NEEDS[node["type"].split(".")[-1]]
+            node["credentials"] = {ctype: auto[ctype]}  # your only credential of this type
         if node["name"] == "escalate_to_human" and escalation_id:
             node["parameters"]["workflowId"] = {
                 "__rl": True, "value": escalation_id, "mode": "list",
