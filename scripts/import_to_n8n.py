@@ -12,7 +12,9 @@ What it does:
   2. if a workflow with the same name already exists it is UPDATED in place (same ID, same URL)
      and every node keeps the credential you already selected (matched by node name);
      otherwise it is created;
-  3. nodes with no credential get your credential of the right type, if you have exactly one of it;
+  3. creates the Ollama credential (and placeholder Slack/Twilio/SMTP credentials so 04/05 can be
+     published) if they do not exist; nodes with no credential get your credential of the right
+     type if you have exactly one of it;
   4. puts workflow 04's ID into the `escalate_to_human` tool of workflow 03.
 Nothing is published/activated. Nodes that never had a credential show a warning: open them and
 select your credential. Only the Python 3 standard library is used - no pip install needed.
@@ -67,8 +69,8 @@ while True:
 
 # Credential type each node needs. If you have exactly ONE credential of that type in n8n,
 # nodes without a credential get it automatically (no clicking through every node).
-NEEDS = {"vectorStorePinecone": "pineconeApi", "embeddingsGoogleGemini": "googlePalmApi",
-         "lmChatGoogleGemini": "googlePalmApi", "postgres": "postgres", "postgresTool": "postgres",
+NEEDS = {"vectorStorePinecone": "pineconeApi", "embeddingsOllama": "ollamaApi", "lmChatOllama": "ollamaApi",
+         "postgres": "postgres", "postgresTool": "postgres",
          "memoryPostgresChat": "postgres", "slack": "slackApi", "twilio": "twilioApi", "emailSend": "smtp"}
 by_type = {}
 try:
@@ -76,6 +78,53 @@ try:
         by_type.setdefault(c["type"], []).append({"id": c["id"], "name": c["name"]})
 except ApiError:
     print("note: cannot list credentials with this API key; nodes keep only credentials chosen before.")
+
+
+def create_credential(name, ctype, data):
+    c = api("POST", "/credentials", {"name": name, "type": ctype, "data": data})
+    by_type.setdefault(ctype, []).append({"id": c["id"], "name": c["name"]})
+    return c["id"]
+
+
+def credential_ok(cid):
+    try:
+        return api("POST", f"/credentials/{cid}/test", {}).get("status") == "OK"
+    except ApiError:
+        return None  # this n8n version cannot test credentials through the API
+
+
+# Ollama credential: created automatically (no secret needed). n8n installed with npm reaches Ollama at
+# localhost; n8n running in Docker reaches it at host.docker.internal - we test and keep the one that works.
+if "ollamaApi" not in by_type:
+    try:
+        for url in [os.environ.get("OLLAMA_URL", "http://localhost:11434"), "http://host.docker.internal:11434"]:
+            cid = create_credential("Ollama account", "ollamaApi", {"baseUrl": url})
+            ok = credential_ok(cid)
+            if ok is not False:
+                print(f"created  Ollama credential ({url})" + ("" if ok else " - could not test it, check it in n8n"))
+                break
+            api("DELETE", f"/credentials/{cid}")
+            by_type.pop("ollamaApi", None)
+        else:
+            print("note: n8n cannot reach Ollama. Is the Ollama app running? (ollama.com) Then run this again.")
+    except ApiError as e:
+        print(f"note: could not create the Ollama credential ({e}); create it in n8n: Credentials -> Ollama.")
+
+# n8n 2.x refuses to PUBLISH a workflow while any node lacks a credential. Until you set up Slack, Twilio
+# and Gmail (Part B), placeholder credentials let you publish 04/05; those three steps just fail softly.
+PLACEHOLDERS = {
+    "slackApi": {"accessToken": "xoxb-placeholder-replace-in-part-b"},
+    "twilioApi": {"authType": "authToken", "accountSid": "ACplaceholder", "authToken": "placeholder"},
+    "smtp": {"user": "placeholder@example.com", "password": "placeholder", "host": "smtp.gmail.com",
+             "port": 465, "secure": True},
+}
+for ctype, data in PLACEHOLDERS.items():
+    if ctype not in by_type:
+        try:
+            create_credential(f"{ctype} (placeholder - replace in Part B)", ctype, data)
+            print(f"created  placeholder credential for {ctype}")
+        except ApiError as e:
+            print(f"note: could not create a placeholder {ctype} credential ({e})")
 auto = {t: cs[0] for t, cs in by_type.items() if len(cs) == 1}
 for t, cs in by_type.items():
     if len(cs) > 1:

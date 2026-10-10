@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## Overview – Workflow 01\n**Goal:** load the store FAQ/policy PDF into the Pinecone index `shopassist` so the agent can search it (RAG).\n\nFlow: Manual trigger → download PDF → split into 1000-char chunks (200 overlap) → embed with Gemini `gemini-embedding-001` (3072 dims) → insert with metadata `source = faq`.\n\n**Run once** (running again adds duplicates – clear the index first).\n\nCourse: Sessions 7–9 (RAG with Pinecone), 18 (metadata).",
+        "content": "## Overview – Workflow 01\n**Goal:** load the store FAQ/policy PDF into the Pinecone index `shopassist` so the agent can search it (RAG).\n\nFlow: Manual trigger → download PDF → split into 1000-char chunks (200 overlap) → embed with Ollama `nomic-embed-text` (768 dims) → insert with metadata `source = faq`.\n\n**Run once** (running again adds duplicates – clear the index first).\n\nCourse: Sessions 7–9 (RAG with Pinecone), 18 (metadata).",
         "width": 520,
         "height": 300,
         "color": 4
@@ -88,20 +88,20 @@
     },
     {
       "parameters": {
-        "modelName": "models/gemini-embedding-001"
+        "model": "nomic-embed-text"
       },
-      "id": "94816f20-cda9-50a9-a2a3-9bf784a62987",
-      "name": "Gemini Embeddings",
-      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "id": "baf32b80-cc40-5a56-bb6a-375db3a63a29",
+      "name": "Ollama Embeddings",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
       "typeVersion": 1,
       "position": [
         600,
         240
       ],
       "credentials": {
-        "googlePalmApi": {
-          "id": "REPLACE_ME_gemini",
-          "name": "Google Gemini account"
+        "ollamaApi": {
+          "id": "REPLACE_ME_ollama",
+          "name": "Ollama account"
         }
       }
     },
@@ -151,7 +151,7 @@
     },
     {
       "parameters": {
-        "content": "## Step notes\n- **Download FAQ PDF**: raw GitHub URL of `data/store_faq.pdf` (repo must be public). Alternative: replace with a *Google Drive → Download file* node.\n- **Set MIME Type to PDF**: GitHub labels the file `application/octet-stream`; the PDF loader needs `application/pdf`.\n- **Default Data Loader** reads the binary PDF and adds metadata `source=faq` – the agent's `faq_knowledge` tool filters on it.\n- **Recursive Text Splitter**: chunk size 1000, overlap 200.\n- **Gemini Embeddings**: `gemini-embedding-001`, 3072-dim vectors; index must use the same dimension and cosine.",
+        "content": "## Step notes\n- **Download FAQ PDF**: raw GitHub URL of `data/store_faq.pdf` (repo must be public). Alternative: replace with a *Google Drive → Download file* node.\n- **Set MIME Type to PDF**: GitHub labels the file `application/octet-stream`; the PDF loader needs `application/pdf`.\n- **Default Data Loader** reads the binary PDF and adds metadata `source=faq` – the agent's `faq_knowledge` tool filters on it.\n- **Recursive Text Splitter**: chunk size 1000, overlap 200.\n- **Ollama Embeddings**: `nomic-embed-text`, 768-dim vectors; index must use the same dimension and cosine.",
         "width": 420,
         "height": 360
       },
@@ -199,7 +199,7 @@
         ]
       ]
     },
-    "Gemini Embeddings": {
+    "Ollama Embeddings": {
       "ai_embedding": [
         [
           {

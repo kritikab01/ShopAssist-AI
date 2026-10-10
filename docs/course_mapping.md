@@ -11,9 +11,9 @@ the "Where used" column stays correct.
 | 2 | n8n basics: workflows, nodes, credentials | All 5 workflows; credentials placeholders; `.env.example` |
 | 3 | Triggers (manual, webhook) & data flow / items | Manual triggers (01, 02), Webhook (05), item-per-URL loop (02) |
 | 4 | Expressions, Code node, IF / routing | `Split URLs into Items` Code node (02), `Is Delayed?` IF node (05), expressions in all messages |
-| 5 | LLMs & prompt engineering | Google Gemini Flash (latest) (free tier); `prompts/agent_system_prompt.md`, summarization prompt (02), ticket prompt (04) |
+| 5 | LLMs & prompt engineering | Local LLM with Ollama (`qwen2.5:3b`); `prompts/agent_system_prompt.md`, summarization prompt (02), ticket prompt (04) |
 | 6 | LLM chains in n8n | Basic LLM Chain `Summarize Page` (02), `Build Ticket` (04) |
-| 7 | Embeddings & vector databases | Google Gemini `gemini-embedding-001` (3072 dims), Pinecone index `shopassist` (cosine) |
+| 7 | Embeddings & vector databases | Ollama `nomic-embed-text` (768 dims), Pinecone index `shopassist` (cosine) |
 | 8 | Document loading & chunking | Default Data Loader (PDF, JSON) + Recursive Character Text Splitter 1000/200 (01, 02) |
 | 9 | RAG with Pinecone | Pinecone insert (01, 02) and `retrieve-as-tool` (03) |
 | 10 | Structured output | Structured Output Parser with `prompts/ticket_schema.json` (04) |

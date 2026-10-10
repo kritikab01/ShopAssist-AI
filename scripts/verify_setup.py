@@ -6,8 +6,8 @@ It reads the keys from .env (git-ignored) and checks:
   1. .env      – which keys are filled in (names only, values are NEVER printed)
   2. n8n       – the API key works, lists your credentials, runs n8n's own "test" on each,
                  and shows which workflow nodes still have no credential
-  3. Gemini    – chat model and batch embeddings (the call n8n uses), embedding size
-  4. Pinecone  – index "shopassist" exists, dimension 3072, metric cosine, vector count
+  3. Ollama    – running, models installed, embedding size 768, chat answers
+  4. Pinecone  – index "shopassist" exists, dimension 768, metric cosine, vector count
   5. Supabase  – connects and counts rows in orders / tickets / n8n_chat_histories
 
 It changes NOTHING: no credentials are created or edited, no workflow is run, published or activated.
@@ -30,9 +30,9 @@ socket.getaddrinfo = lambda *a, **k: sorted(_getaddrinfo(*a, **k), key=lambda r:
 
 ROOT = Path(__file__).resolve().parent.parent
 ENV_FILE = ROOT / ".env"
-PINECONE_DIM = 3072
-CHAT_MODEL = "models/gemini-flash-latest"
-EMBED_MODEL = "models/gemini-embedding-001"
+PINECONE_DIM = 768
+CHAT_MODEL = "qwen2.5:3b"          # keep in sync with scripts/build_workflows.py
+EMBED_MODEL = "nomic-embed-text"
 results = []  # (section, ok, message)
 
 
@@ -128,7 +128,7 @@ if not ENV_FILE.exists():
     report(".env", False, f"{ENV_FILE.name} not found. Run: cp .env.example .env  then fill it in.")
 else:
     report(".env", True, ".env found (values are not shown)")
-    for key in ["N8N_URL", "N8N_API_KEY", "GOOGLE_GEMINI_API_KEY", "PINECONE_API_KEY", "PINECONE_INDEX",
+    for key in ["N8N_URL", "N8N_API_KEY", "PINECONE_API_KEY", "PINECONE_INDEX",
                 "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD"]:
         print(f"       {key:24} {'set' if is_set(key) else 'MISSING / placeholder'}")
 
@@ -152,7 +152,7 @@ else:
         for w in sorted(mine, key=lambda w: w["name"]):
             missing = [n["name"] for n in w["nodes"]
                        if not n.get("credentials") and n["type"].split(".")[-1] in
-                       ("vectorStorePinecone", "embeddingsGoogleGemini", "lmChatGoogleGemini", "postgres",
+                       ("vectorStorePinecone", "embeddingsOllama", "lmChatOllama", "postgres",
                         "postgresTool", "memoryPostgresChat", "slack", "twilio", "emailSend")]
             state = "ACTIVE/published" if w.get("active") else "not active"
             print(f"       {w['name'][:45]:45} {state:17} "
@@ -163,6 +163,9 @@ else:
                                  f"If the API key has limited scopes, add credential:list and credential:read.")
         else:
             for c in creds.get("data", []):
+                if "placeholder" in c["name"].lower():
+                    print(f"       credential '{c['name']}': placeholder until Part B (not tested)")
+                    continue
                 st2, t = http("POST", f"{n8n}/api/v1/credentials/{c['id']}/test", H, {}, timeout=60)
                 if st2 == 200 and isinstance(t, dict):
                     report("n8n", t.get("status") == "OK",
@@ -170,43 +173,32 @@ else:
                 else:
                     print(f"       credential '{c['name']}' ({c['type']}): exists (n8n cannot self-test it here)")
             names = [c["type"] for c in creds.get("data", [])]
-            if names.count("googlePalmApi") > 1:
-                report("n8n", False, "more than one Gemini credential exists - keep only the working one")
+            if names.count("ollamaApi") > 1:
+                report("n8n", False, "more than one Ollama credential exists - keep only the working one")
 
-# ------------------------------------------------------------------ 3. Gemini
-print("\n3) Google Gemini")
-if not is_set("GOOGLE_GEMINI_API_KEY"):
-    report("Gemini", False, "GOOGLE_GEMINI_API_KEY missing in .env")
+# ------------------------------------------------------------------ 3. Ollama
+print("\n3) Ollama (local AI)")
+oll = (ENV.get("OLLAMA_URL") or "http://localhost:11434").rstrip("/")
+st, tags = http("GET", f"{oll}/api/tags", timeout=10)
+if st != 200:
+    report("Ollama", False, f"Ollama is not running at {oll}. Install it from ollama.com and open the Ollama app.")
 else:
-    gk = ENV["GOOGLE_GEMINI_API_KEY"]
-    if not gk.startswith("AIza"):
-        print("       note: key starts with something other than 'AIza' (AI Studio keys starting 'AQ.' are fine). "
-              "Make sure it comes from a PERSONAL Gmail, not the School account. Testing it now (up to 1 min)...")
-    G = "https://generativelanguage.googleapis.com/v1beta"
-    net = can_connect("generativelanguage.googleapis.com")
-    print(f"       network to Google: IPv4 {net['IPv4']}, IPv6 {net['IPv6']}")
-    if net["IPv4"] == "ok" and net["IPv6"].startswith("FAILED"):
-        print("       IPv6 is broken on this network (IPv4 works). This script now uses IPv4. If n8n's Gemini calls")
-        print("       are slow or time out: System Settings -> Wi-Fi -> Details -> TCP/IP -> Configure IPv6: Link-local only")
-    if net["IPv4"] != "ok" and net["IPv6"] != "ok":
-        report("Gemini", False, "this Mac cannot reach generativelanguage.googleapis.com - switch Wi-Fi / phone "
-                                "hotspot, turn off VPN or firewall, then try again")
-    st, r = http("POST", f"{G}/{CHAT_MODEL}:generateContent?key={gk}", body={
-        "contents": [{"parts": [{"text": "Reply with the single word OK"}]}]}, timeout=20)
-    if st == 200 and r.get("candidates"):
-        report("Gemini", True, f"chat {CHAT_MODEL} answers: "
-                               f"{clean(r['candidates'][0]['content']['parts'][0].get('text', '')).strip()[:20]}")
-    else:
-        report("Gemini", False, f"chat {CHAT_MODEL}: HTTP {st} {api_error(r)}")
-    st, r = http("POST", f"{G}/{EMBED_MODEL}:batchEmbedContents?key={gk}", body={"requests": [
-        {"model": EMBED_MODEL, "content": {"parts": [{"text": "return policy"}]}}]}, timeout=20)
-    if st == 200 and r.get("embeddings"):
-        dims = len(r["embeddings"][0].get("values", []))
-        report("Gemini", dims == PINECONE_DIM, f"batch embeddings {EMBED_MODEL}: {dims} dimensions "
-                                                f"(Pinecone index must be {PINECONE_DIM})")
-    else:
-        report("Gemini", False, f"batch embeddings {EMBED_MODEL}: HTTP {st} {api_error(r)} "
-                                f"<- this is what makes Pinecone say 'Vector dimension 0'")
+    have = {m.get("name", "").split(":latest")[0] for m in tags.get("models", [])}
+    for model in (CHAT_MODEL, EMBED_MODEL):
+        report("Ollama", model in have, f"model {model} " + ("installed" if model in have else
+                                                              f"MISSING -> run: ollama pull {model}"))
+    if EMBED_MODEL in have:
+        st, r = http("POST", f"{oll}/api/embed", body={"model": EMBED_MODEL, "input": ["return policy"]}, timeout=120)
+        dims = len((r.get("embeddings") or [[]])[0]) if st == 200 else 0
+        report("Ollama", dims == PINECONE_DIM, f"embeddings: {dims} dimensions (Pinecone index must be {PINECONE_DIM})")
+    if CHAT_MODEL in have:
+        print("       asking the chat model a test question (first answer can take ~30 s while it loads)...")
+        st, r = http("POST", f"{oll}/api/chat", body={"model": CHAT_MODEL, "stream": False, "think": False,
+                                                       "messages": [{"role": "user", "content": "Reply with the single word OK"}]},
+                     timeout=180)
+        ok = st == 200 and isinstance(r, dict) and r.get("message")
+        report("Ollama", bool(ok), f"chat {CHAT_MODEL}: " + (clean(r["message"].get("content", "")).strip()[:30]
+                                                           if ok else f"HTTP {st} {api_error(r)}"))
 
 # ------------------------------------------------------------------ 4. Pinecone
 print("\n4) Pinecone")
@@ -217,16 +209,17 @@ else:
     PH = {"Api-Key": ENV["PINECONE_API_KEY"], "X-Pinecone-API-Version": "2025-01"}
     st, r = http("GET", f"https://api.pinecone.io/indexes/{index}", PH)
     if st != 200:
-        report("Pinecone", False, f"index '{index}': HTTP {st} {api_error(r)}")
+        report("Pinecone", False, f"index '{index}': HTTP {st} {api_error(r)} -> run: python3 scripts/setup_pinecone.py")
     else:
         dim, metric = r.get("dimension"), r.get("metric")
-        report("Pinecone", dim == PINECONE_DIM, f"index '{index}' dimension {dim} (need {PINECONE_DIM})")
+        report("Pinecone", dim == PINECONE_DIM, f"index '{index}' dimension {dim} (need {PINECONE_DIM})"
+                                                  + ("" if dim == PINECONE_DIM else " -> run: python3 scripts/setup_pinecone.py"))
         report("Pinecone", metric == "cosine", f"metric {metric} (need cosine)")
         report("Pinecone", (r.get("status") or {}).get("ready", False), f"status {(r.get('status') or {}).get('state')}")
         st, s = http("POST", f"https://{r['host']}/describe_index_stats", PH, {})
         if st == 200:
             print(f"       vectors stored: {s.get('totalVectorCount', s.get('total_vector_count', '?'))} "
-                  f"(0 = run workflows 01 and 02; ~6-10 after 01, ~10-14 after 02)")
+                  f"(0 = run workflows 01 and 02; ~6 after 01, ~10 after 02)")
 
 # ------------------------------------------------------------------ 5. Supabase
 print("\n5) Supabase Postgres")

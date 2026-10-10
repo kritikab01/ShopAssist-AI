@@ -18,13 +18,16 @@ OUT_DIR = ROOT / "workflows"
 RAW_BASE = "https://raw.githubusercontent.com/kritikab01/ShopAssist-AI/main"
 
 PINECONE_INDEX = "shopassist"
-# Free-tier Google Gemini (API key from aistudio.google.com, no credit card).
-CHAT_MODEL = "models/gemini-flash-latest"
-EMBED_MODEL = "models/gemini-embedding-001"  # 3072-dim vectors (text-embedding-004 is deprecated)
+# Local, free AI with Ollama (https://ollama.com) - no API key, runs on your own computer.
+#   ollama pull qwen2.5:3b        (chat + tool calling, ~2 GB; with 16 GB RAM you can use qwen2.5:7b)
+#   ollama pull nomic-embed-text  (embeddings, 768 dimensions)
+CHAT_MODEL = "qwen2.5:3b"
+EMBED_MODEL = "nomic-embed-text"  # 768-dim vectors -> Pinecone index must be dimension 768
+NUM_CTX = 8192  # Ollama's default context (2048 tokens) is too small for the agent prompt + search results
 
 # Placeholder credentials: after import, open each node and pick your own credential.
 CRED = {
-    "googlePalmApi": {"id": "REPLACE_ME_gemini", "name": "Google Gemini account"},
+    "ollamaApi": {"id": "REPLACE_ME_ollama", "name": "Ollama account"},
     "pineconeApi": {"id": "REPLACE_ME_pinecone", "name": "Pinecone account"},
     "postgres": {"id": "REPLACE_ME_postgres", "name": "Supabase Postgres"},
     "slackApi": {"id": "REPLACE_ME_slack", "name": "Slack account"},
@@ -90,15 +93,18 @@ def rl(value, mode="list"):
     return {"__rl": True, "value": value, "mode": mode}
 
 
-def gemini_chat(wf, name, pos, temperature=0.2):
-    return wf.node(name, "@n8n/n8n-nodes-langchain.lmChatGoogleGemini", 1, pos,
-                   {"modelName": CHAT_MODEL, "options": {"temperature": temperature}},
-                   ["googlePalmApi"])
+def ollama_chat(wf, name, pos, temperature=0.2, json_mode=False):
+    options = {"temperature": temperature, "numCtx": NUM_CTX,
+               "think": False}  # qwen2.5 is not a "thinking" model; n8n's default (true) can be rejected
+    if json_mode:
+        options["format"] = "json"  # forces valid JSON output (used for the structured ticket)
+    return wf.node(name, "@n8n/n8n-nodes-langchain.lmChatOllama", 1, pos,
+                   {"model": CHAT_MODEL, "options": options}, ["ollamaApi"])
 
 
-def gemini_embeddings(wf, name, pos):
-    return wf.node(name, "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini", 1, pos,
-                   {"modelName": EMBED_MODEL}, ["googlePalmApi"])
+def ollama_embeddings(wf, name, pos):
+    return wf.node(name, "@n8n/n8n-nodes-langchain.embeddingsOllama", 1, pos,
+                   {"model": EMBED_MODEL}, ["ollamaApi"])
 
 
 def text_splitter(wf, name, pos):
@@ -123,7 +129,7 @@ def wf01():
               "**Goal:** load the store FAQ/policy PDF into the Pinecone index `shopassist` "
               "so the agent can search it (RAG).\n\n"
               "Flow: Manual trigger → download PDF → split into 1000-char chunks (200 overlap) → "
-              "embed with Gemini `gemini-embedding-001` (3072 dims) → insert with metadata `source = faq`.\n\n"
+              "embed with Ollama `nomic-embed-text` (768 dims) → insert with metadata `source = faq`.\n\n"
               "**Run once** (running again adds duplicates – clear the index first).\n\n"
               "Course: Sessions 7–9 (RAG with Pinecone), 18 (metadata).",
               (-80, -360), w=520, h=300, color=4)
@@ -146,7 +152,7 @@ def wf01():
         ),
     })
     pc = pinecone_insert(wf, "Insert into Pinecone (source=faq)", (680, 0))
-    emb = gemini_embeddings(wf, "Gemini Embeddings", (600, 240))
+    emb = ollama_embeddings(wf, "Ollama Embeddings", (600, 240))
     loader = wf.node("Default Data Loader (PDF)", "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
                      1.1, (800, 240), {
                          "dataType": "binary",
@@ -164,7 +170,7 @@ def wf01():
               "- **Default Data Loader** reads the binary PDF and adds metadata `source=faq` – "
               "the agent's `faq_knowledge` tool filters on it.\n"
               "- **Recursive Text Splitter**: chunk size 1000, overlap 200.\n"
-              "- **Gemini Embeddings**: `gemini-embedding-001`, 3072-dim vectors; index must use the same dimension and cosine.",
+              "- **Ollama Embeddings**: `nomic-embed-text`, 768-dim vectors; index must use the same dimension and cosine.",
               (1080, -40), w=420, h=360)
     wf.link(t, dl)
     wf.link(dl, mime)
@@ -226,7 +232,7 @@ def wf02():
             "Page title: {{ $json.title }}\n\nPage text:\n{{ $json.content }}"
         ),
     })
-    llm = gemini_chat(wf, "Gemini Chat Model", (1000, 220), temperature=0)
+    llm = ollama_chat(wf, "Ollama Chat Model", (1000, 220), temperature=0)
     prep = wf.node("Prepare Document", "n8n-nodes-base.set", 3.4, (1240, 0), {
         "assignments": {"assignments": [
             {"id": "a1", "name": "url", "type": "string",
@@ -238,7 +244,7 @@ def wf02():
         "options": {},
     })
     pc = pinecone_insert(wf, "Insert into Pinecone (source=website)", (1480, 0))
-    emb = gemini_embeddings(wf, "Gemini Embeddings", (1400, 240))
+    emb = ollama_embeddings(wf, "Ollama Embeddings", (1400, 240))
     loader = wf.node("Default Data Loader (summary)", "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
                      1.1, (1600, 240), {
                          "dataType": "json",
@@ -254,7 +260,7 @@ def wf02():
               "- **Read urls.txt** downloads the URL list from GitHub (one URL per line).\n"
               "- **Fetch Page HTML** runs once per URL (n8n loops over items automatically).\n"
               "- **Extract Text from HTML** keeps `<body>` text and skips nav/header/footer.\n"
-              "- **Summarize Page** = Basic LLM Chain + Gemini Flash (latest) (temperature 0).\n"
+              "- **Summarize Page** = Basic LLM Chain + Ollama `qwen2.5:3b` (temperature 0).\n"
               "- **Default Data Loader** stores the summary with metadata `source=website`, `url`, "
               "`title` so the agent can cite the page.",
               (1880, -40), w=440, h=320)
@@ -302,7 +308,7 @@ def wf03():
         "promptType": "auto",
         "options": {"systemMessage": "=" + system_prompt, "maxIterations": 8},
     })
-    llm = gemini_chat(wf, "Gemini Chat Model", (0, 300))
+    llm = ollama_chat(wf, "Ollama Chat Model", (0, 300))
     mem = wf.node("Postgres Chat Memory", "@n8n/n8n-nodes-langchain.memoryPostgresChat", 1.3, (180, 300), {
         "tableName": "n8n_chat_histories",
         "contextWindowLength": 10,
@@ -318,7 +324,7 @@ def wf03():
             "includeDocumentMetadata": True,
             "options": {"metadata": metadata(("source", source))},
         }, ["pineconeApi"])
-        emb = gemini_embeddings(wf, f"Gemini Embeddings ({source})", (x, 520))
+        emb = ollama_embeddings(wf, f"Ollama Embeddings ({source})", (x, 520))
         wf.link(emb, node, "ai_embedding")
         wf.link(node, agent, "ai_tool")
 
@@ -433,15 +439,41 @@ def wf04():
                             "Phone: {{ $json.phone }}\n"
                             "Order ID: {{ $json.order_id }}\n"
                             "Reason for escalation: {{ $json.reason }}\n"
-                            "Conversation summary: {{ $json.conversation_summary }}"
+                            "Conversation summary: {{ $json.conversation_summary }}\n\n"
+                            "Answer with ONLY this JSON shape (fill every field): {\"output\": {\"customer_name\": \"...\", "
+                            "\"phone\": \"...\", \"order_id\": \"...\", \"issue_type\": \"refund|return|delivery|damaged_item|payment|size|other\", "
+                            "\"sentiment\": \"positive|neutral|negative|angry\", \"priority\": \"low|medium|high\", "
+                            "\"summary\": \"...\", \"suggested_action\": \"...\"}}"
                         ),
                         "hasOutputParser": True,
-                    })
-    llm = gemini_chat(wf, "Gemini Chat Model", (160, 240), temperature=0)
+                    }, onError="continueRegularOutput")  # bad JSON -> "Normalize Ticket" still builds a ticket
+    llm = ollama_chat(wf, "Ollama Chat Model", (160, 240), temperature=0, json_mode=True)
     parser = wf.node("Ticket JSON Schema", "@n8n/n8n-nodes-langchain.outputParserStructured", 1.2,
                      (360, 240), {"schemaType": "manual", "inputSchema": schema})
-    T = "$('Build Ticket (Structured Output)').item.json.output"
-    save = wf.node("Save Ticket in Postgres", "n8n-nodes-base.postgres", 2.5, (560, 0), {
+    # Small local models sometimes skip a field or the {"output": ...} wrapper. This step fills any gap
+    # from the agent's inputs, so a ticket is ALWAYS saved and the customer always gets a ticket ID.
+    norm = wf.node("Normalize Ticket (fallback)", "n8n-nodes-base.code", 2, (440, 0), {
+        "jsCode": (
+            "// Take the AI ticket; fill anything missing from what the agent sent.\n"
+            "const t = $json.output || {};\n"
+            "const inp = $('When Called by Agent').first().json;\n"
+            "const reason = String(inp.reason || '').toLowerCase();\n"
+            "let phone = String(t.phone || inp.phone || '').replace(/[^0-9+]/g, '');\n"
+            "if (/^[0-9]{10}$/.test(phone)) phone = '+91' + phone;  // Indian 10-digit number -> E.164\n"
+            "return [{ json: { output: {\n"
+            "  customer_name: t.customer_name || inp.customer_name || 'Unknown',\n"
+            "  phone,\n"
+            "  order_id: String(t.order_id || inp.order_id || '').toUpperCase(),\n"
+            "  issue_type: t.issue_type || (reason.includes('refund') ? 'refund' : 'other'),\n"
+            "  sentiment: t.sentiment || (reason.includes('angry') ? 'angry' : 'neutral'),\n"
+            "  priority: t.priority || 'high',\n"
+            "  summary: t.summary || inp.conversation_summary || inp.reason || '',\n"
+            "  suggested_action: t.suggested_action || 'Contact the customer and review the chat.',\n"
+            "} } }];\n"
+        ),
+    })
+    T = "$('Normalize Ticket (fallback)').item.json.output"
+    save = wf.node("Save Ticket in Postgres", "n8n-nodes-base.postgres", 2.5, (660, 0), {
         "operation": "executeQuery",
         "query": (
             "INSERT INTO tickets (customer_name, phone, order_id, issue_type, sentiment, priority,\n"
@@ -455,7 +487,7 @@ def wf04():
             "$json.output.summary, $json.output.suggested_action ] }}"
         )},
     }, ["postgres"])
-    slack = wf.node("Alert Slack #support-escalations", "n8n-nodes-base.slack", 2.3, (780, 0), {
+    slack = wf.node("Alert Slack #support-escalations", "n8n-nodes-base.slack", 2.3, (880, 0), {
         "select": "channel",
         "channelId": rl("#support-escalations", "name"),
         "text": (
@@ -468,7 +500,7 @@ def wf04():
         ),
         "otherOptions": {},
     }, ["slackApi"], onError="continueRegularOutput")
-    sms = wf.node("SMS Customer (Twilio)", "n8n-nodes-base.twilio", 1, (1000, 0), {
+    sms = wf.node("SMS Customer (Twilio)", "n8n-nodes-base.twilio", 1, (1100, 0), {
         "from": TWILIO_FROM,
         "to": "={{ " + T + ".phone }}",
         "message": (
@@ -478,7 +510,7 @@ def wf04():
         ),
         "options": {},
     }, ["twilioApi"], onError="continueRegularOutput")
-    mail = wf.node("Email Support Team (SMTP)", "n8n-nodes-base.emailSend", 2.1, (1220, 0), {
+    mail = wf.node("Email Support Team (SMTP)", "n8n-nodes-base.emailSend", 2.1, (1320, 0), {
         "fromEmail": SENDER_EMAIL,
         "toEmail": SUPPORT_EMAIL,
         "subject": (
@@ -500,7 +532,7 @@ def wf04():
         ),
         "options": {},
     }, ["smtp"], onError="continueRegularOutput")
-    ret = wf.node("Return Ticket ID to Agent", "n8n-nodes-base.set", 3.4, (1440, 0), {
+    ret = wf.node("Return Ticket ID to Agent", "n8n-nodes-base.set", 3.4, (1540, 0), {
         "assignments": {"assignments": [
             {"id": "r1", "name": "ticket_id", "type": "string",
              "value": "={{ $('Save Ticket in Postgres').item.json.ticket_id }}"},
@@ -517,8 +549,8 @@ def wf04():
               "- Twilio trial accounts can only SMS **verified** numbers.\n"
               "- Slack: invite the bot to `#support-escalations` (`/invite @your-bot`).\n"
               "- The **last node's output** is what the agent receives as the tool result.",
-              (1660, -40), w=400, h=280)
-    for a, b in [(trig, build), (build, save), (save, slack), (slack, sms), (sms, mail), (mail, ret)]:
+              (1760, -40), w=400, h=280)
+    for a, b in [(trig, build), (build, norm), (norm, save), (save, slack), (slack, sms), (sms, mail), (mail, ret)]:
         wf.link(a, b)
     wf.link(llm, build, "ai_languageModel")
     wf.link(parser, build, "ai_outputParser")
