@@ -1,0 +1,452 @@
+{
+  "name": "03 ShopAssist Support Agent (Chat)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Overview – Workflow 03\n**Goal:** the customer-facing AI agent on a **public chat URL**.\n\nThe Tools Agent decides which tool to call:\n- `faq_knowledge` – Pinecone, filter `source=faq`\n- `website_knowledge` – Pinecone, filter `source=website`\n- `order_lookup` – Postgres query by order ID or phone\n- `escalate_to_human` – calls workflow 04 (Slack + SMS + e-mail)\n\nMemory: Postgres Chat Memory (table `n8n_chat_histories`, last 10 messages).\n\nCourse: 1–4 (agents, n8n basics), 7–9 & 18 (RAG + metadata filter), 12–13 (sub-workflow tool), 14–15 (agentic RAG, two knowledge bases), 16–17 (public chat), 19–20 (agent + Postgres).",
+        "width": 600,
+        "height": 400,
+        "color": 4
+      },
+      "id": "af760e80-e92f-561c-8345-9d3be463cedf",
+      "name": "Overview – Workflow 03",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -120,
+        -460
+      ]
+    },
+    {
+      "parameters": {
+        "public": true,
+        "mode": "hostedChat",
+        "initialMessages": "Hi! I'm ShopAssist from UrbanThread 👕\nAsk me about orders, returns, sizes, delivery or offers.",
+        "options": {
+          "title": "UrbanThread ShopAssist",
+          "subtitle": "AI support – a human can take over anytime",
+          "inputPlaceholder": "e.g. Where is my order UT1003?"
+        }
+      },
+      "id": "c1a9ccec-4b53-540d-a7e0-77034e804f74",
+      "name": "Public Chat (UrbanThread)",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "7d2085bc-5d34-52cb-be82-66640b50391e"
+    },
+    {
+      "parameters": {
+        "agent": "toolsAgent",
+        "promptType": "auto",
+        "options": {
+          "systemMessage": "=You are ShopAssist, the friendly customer-support assistant of UrbanThread, an online clothing store in India. Prices are in Indian Rupees (Rs). Today's date is {{ $now.toFormat('dd LLL yyyy') }}.\n\n## Your tools\n- faq_knowledge: official store FAQ and policies (returns, refunds, sizes, delivery, COD, payments, cancellations).\n- website_knowledge: summaries of UrbanThread web pages (shipping partners, festive delays, size and fit tips, offers and coupons, gift cards, garment care, sustainability).\n- order_lookup: order details from the database. Input is ONE order ID (like UT1003) or ONE phone number (like +919000000003).\n- escalate_to_human: creates a support ticket and alerts the human team by Slack, SMS and e-mail. Returns a ticket ID.\n\n## Rules\n1. Answer ONLY using information returned by your tools. Never invent policies, prices, dates or order details. Do not use general knowledge about other stores.\n2. For policy questions, search faq_knowledge first; for offers, shipping partners, festive delays, fit tips or garment care, search website_knowledge. Use both if needed.\n3. At the end of every answer, cite where the information came from, e.g. \"(Source: Store FAQ)\", \"(Source: website – <url>)\" or \"(Source: order database)\".\n4. If the customer asks about a specific order (status, delivery date, return, refund) and has not given an order ID or phone number, ask for it politely before doing anything else. Never guess an order ID.\n5. Only share order details with the person who gives the matching order ID or phone number.\n6. Call escalate_to_human when ANY of these is true:\n   a. the customer is angry, abusive, or threatens to complain / leave a bad review;\n   b. the customer asks for a refund of MORE than Rs 5,000 (check the order amount with order_lookup) – you are not allowed to approve it;\n   c. you cannot find the answer in your tools after searching;\n   d. the customer explicitly asks for a human.\n   Before escalating, try to collect the customer's name, phone number and order ID (if relevant), but do not block escalation if they refuse.\n   After escalating, apologise, give the ticket ID and say a human will contact them within 4 business hours.\n7. If the question is not about UrbanThread (e.g. weather, coding, other shops), politely say you can only help with UrbanThread orders and policies. Do not escalate out-of-scope questions.\n8. Keep answers short (max 5 sentences or a short list), warm and simple. Use Rs for amounts.",
+          "maxIterations": 8
+        }
+      },
+      "id": "446aa4ac-2203-5461-a287-3c4320b3bc8b",
+      "name": "ShopAssist AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        360,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list"
+        },
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "4cf58159-e8b8-5521-951e-875767b37bd4",
+      "name": "OpenAI Chat Model (gpt-4o-mini)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_ME_openai",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableName": "n8n_chat_histories",
+        "contextWindowLength": 10
+      },
+      "id": "636bc4c3-7d3b-55b3-8f1b-735b8125df8a",
+      "name": "Postgres Chat Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        180,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME_postgres",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolName": "faq_knowledge",
+        "toolDescription": "Search the official UrbanThread store FAQ and policies: returns (15 days), refunds, exchanges, sizes, delivery times and charges, COD, payments, cancellations.",
+        "pineconeIndex": {
+          "__rl": true,
+          "value": "shopassist",
+          "mode": "list"
+        },
+        "topK": 4,
+        "includeDocumentMetadata": true,
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "source",
+                "value": "faq"
+              }
+            ]
+          }
+        }
+      },
+      "id": "bc0e37fd-bfff-5e46-b217-3d5cff63cdf3",
+      "name": "faq_knowledge",
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [
+        360,
+        300
+      ],
+      "credentials": {
+        "pineconeApi": {
+          "id": "REPLACE_ME_pinecone",
+          "name": "Pinecone account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "options": {}
+      },
+      "id": "afc4b12f-9dca-5e24-ba40-6c0ce9dbfa96",
+      "name": "Embeddings (faq)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        360,
+        520
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_ME_openai",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolName": "website_knowledge",
+        "toolDescription": "Search summaries of UrbanThread web pages: courier partners, dispatch times, festive/Diwali delays, size and fit tips, offers and coupon codes, gift cards, loyalty points, garment care, sustainability.",
+        "pineconeIndex": {
+          "__rl": true,
+          "value": "shopassist",
+          "mode": "list"
+        },
+        "topK": 4,
+        "includeDocumentMetadata": true,
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "source",
+                "value": "website"
+              }
+            ]
+          }
+        }
+      },
+      "id": "c0110b5b-5175-5666-a193-97d7b3d46f17",
+      "name": "website_knowledge",
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [
+        560,
+        300
+      ],
+      "credentials": {
+        "pineconeApi": {
+          "id": "REPLACE_ME_pinecone",
+          "name": "Pinecone account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "options": {}
+      },
+      "id": "f81a3a2f-7848-5357-bebd-bbfb9852ca05",
+      "name": "Embeddings (website)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        560,
+        520
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_ME_openai",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Look up a customer's order in the database. Input: exactly ONE order ID (like UT1003) or ONE phone number (like +919000000003 or 9000000003). Returns status, items, amount in Rs, payment method, expected delivery date, courier and tracking number.",
+        "operation": "executeQuery",
+        "query": "-- $1 = order ID or phone number provided by the customer\nSELECT order_id, customer_name, items, amount_inr, payment_method, status, city,\n       order_date, expected_delivery, courier, tracking_no\nFROM orders\nWHERE order_id = UPPER(TRIM($1))\n   OR RIGHT(phone, 10) = RIGHT(REGEXP_REPLACE($1, '[^0-9]', '', 'g'), 10)\nLIMIT 5;",
+        "options": {
+          "queryReplacement": "={{ $fromAI('order_id_or_phone', 'The order ID (e.g. UT1003) or phone number given by the customer', 'string') }}"
+        }
+      },
+      "id": "b6c98274-72b4-546d-9c89-e8d241a6c54a",
+      "name": "order_lookup",
+      "type": "n8n-nodes-base.postgresTool",
+      "typeVersion": 2.5,
+      "position": [
+        760,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME_postgres",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "description": "Create a support ticket and alert the human support team (Slack, SMS, e-mail). Use when the customer is angry, wants a refund above Rs 5,000, asks for a human, or the answer is not in the knowledge bases. Returns the ticket ID to give to the customer.",
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_WORKFLOW_04_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "customer_name": "={{ $fromAI('customer_name', 'Customer name, or Unknown', 'string') }}",
+            "phone": "={{ $fromAI('phone', 'Customer phone number, or empty string', 'string') }}",
+            "order_id": "={{ $fromAI('order_id', 'Order ID like UT1003, or empty string', 'string') }}",
+            "reason": "={{ $fromAI('reason', 'Why you are escalating: angry customer, refund over Rs 5,000, no answer found, or human requested', 'string') }}",
+            "conversation_summary": "={{ $fromAI('conversation_summary', 'Short summary of the conversation and the exact problem of the customer', 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "customer_name",
+              "displayName": "customer_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "order_id",
+              "displayName": "order_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "conversation_summary",
+              "displayName": "conversation_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "id": "a480067f-31e8-5bc0-82db-890619bee46b",
+      "name": "escalate_to_human",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2,
+      "position": [
+        960,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Setup notes\n1. Import workflow 04 first, copy its ID from the URL, and select it in **escalate_to_human**.\n2. Set credentials on every node with a ⚠ warning.\n3. **Activate** the workflow, open the Chat Trigger and copy the **public chat URL**.\n4. The system prompt lives in `prompts/agent_system_prompt.md` (rules: answer only from tools, cite source, ask for order ID, escalate if angry / refund > Rs 5,000 / no answer).",
+        "width": 420,
+        "height": 300
+      },
+      "id": "67da0fae-f0aa-59bd-be00-653f370b63b8",
+      "name": "Setup notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1180,
+        -40
+      ]
+    }
+  ],
+  "connections": {
+    "Embeddings (faq)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "faq_knowledge",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "faq_knowledge": {
+      "ai_tool": [
+        [
+          {
+            "node": "ShopAssist AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings (website)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "website_knowledge",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "website_knowledge": {
+      "ai_tool": [
+        [
+          {
+            "node": "ShopAssist AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "order_lookup": {
+      "ai_tool": [
+        [
+          {
+            "node": "ShopAssist AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "escalate_to_human": {
+      "ai_tool": [
+        [
+          {
+            "node": "ShopAssist AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Public Chat (UrbanThread)": {
+      "main": [
+        [
+          {
+            "node": "ShopAssist AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model (gpt-4o-mini)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "ShopAssist AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "ShopAssist AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "tags": []
+}
