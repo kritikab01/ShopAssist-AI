@@ -185,7 +185,7 @@ else:
     G = "https://generativelanguage.googleapis.com/v1beta"
     net = can_connect("generativelanguage.googleapis.com")
     print(f"       network to Google: IPv4 {net['IPv4']}, IPv6 {net['IPv6']}")
-    if net["IPv4"] == "ok" and net["IPv6"] != "ok":
+    if net["IPv4"] == "ok" and net["IPv6"].startswith("FAILED"):
         print("       IPv6 is broken on this network (IPv4 works). This script now uses IPv4. If n8n's Gemini calls")
         print("       are slow or time out: System Settings -> Wi-Fi -> Details -> TCP/IP -> Configure IPv6: Link-local only")
     if net["IPv4"] != "ok" and net["IPv6"] != "ok":
