@@ -81,4 +81,7 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     print(f"ShopAssist app on http://localhost:{PORT}  (n8n: {N8N}, Ollama: {OLLAMA})  - Ctrl+C to stop")
-    ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+    try:
+        ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+    except KeyboardInterrupt:
+        print("\nShopAssist app stopped.")
