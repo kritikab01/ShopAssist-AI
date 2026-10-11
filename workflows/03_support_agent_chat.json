@@ -517,7 +517,8 @@
   },
   "pinData": {},
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "executionTimeout": 240
   },
   "active": false,
   "tags": []

@@ -251,7 +251,8 @@
   },
   "pinData": {},
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "executionTimeout": 150
   },
   "active": false,
   "tags": []

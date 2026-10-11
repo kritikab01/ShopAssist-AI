@@ -43,8 +43,10 @@ SENDER_EMAIL = "your.gmail@gmail.com"  # placeholder: the Gmail account used in 
 class WF:
     """Tiny builder for an n8n workflow (nodes + connections)."""
 
-    def __init__(self, name):
-        self.name, self.nodes, self.connections = name, [], {}
+    def __init__(self, name, timeout=None):
+        # timeout (seconds): n8n stops a run that takes longer, so a stuck agent can never keep
+        # the local model busy and block every other question.
+        self.name, self.nodes, self.connections, self.timeout = name, [], {}, timeout
 
     def node(self, name, type_, version, pos, params=None, creds=None, **extra):
         n = {
@@ -79,7 +81,7 @@ class WF:
             "nodes": self.nodes,
             "connections": self.connections,
             "pinData": {},
-            "settings": {"executionOrder": "v1"},
+            "settings": {"executionOrder": "v1", **({"executionTimeout": self.timeout} if self.timeout else {})},
             "active": False,
             "tags": [],
         }
@@ -145,7 +147,7 @@ def metadata(*pairs):
 
 # ---------------------------------------------------------------- 01 ingest FAQ PDF
 def wf01():
-    wf = WF("01 Ingest FAQ PDF into Pinecone")
+    wf = WF("01 Ingest FAQ PDF into Pinecone", timeout=900)
     wf.sticky("Overview – Workflow 01",
               "**Goal:** load the store FAQ/policy PDF into the Pinecone index `shopassist` "
               "so the agent can search it (RAG).\n\n"
@@ -204,7 +206,7 @@ def wf01():
 
 # ---------------------------------------------------------------- 02 scrape + summarize
 def wf02():
-    wf = WF("02 Scrape Web Pages, Summarize and Store")
+    wf = WF("02 Scrape Web Pages, Summarize and Store", timeout=1200)
     wf.sticky("Overview – Workflow 02",
               "**Goal:** scrape store web pages, summarize each with the LLM, and store the summaries "
               "in Pinecone with metadata `source = website` and `url`.\n\n"
@@ -297,7 +299,7 @@ def wf02():
 
 # ---------------------------------------------------------------- 03 support agent
 def wf03():
-    wf = WF("03 ShopAssist Support Agent (Chat)")
+    wf = WF("03 ShopAssist Support Agent (Chat)", timeout=240)
     system_prompt = (ROOT / "prompts" / "agent_system_prompt.md").read_text(encoding="utf-8").strip()
 
     wf.sticky("Overview – Workflow 03",
@@ -441,7 +443,7 @@ def wf03():
 
 # ---------------------------------------------------------------- 04 escalation sub-workflow
 def wf04():
-    wf = WF("04 Escalation Sub-workflow (Ticket + Slack + SMS + Email)")
+    wf = WF("04 Escalation Sub-workflow (Ticket + Slack + SMS + Email)", timeout=150)
     schema = (ROOT / "prompts" / "ticket_schema.json").read_text(encoding="utf-8")
     wf.sticky("Overview – Workflow 04",
               "**Called by** the `escalate_to_human` tool in workflow 03.\n\n"
@@ -599,7 +601,7 @@ def wf04():
 
 # ---------------------------------------------------------------- 05 order update webhook
 def wf05():
-    wf = WF("05 Order Status Update Webhook")
+    wf = WF("05 Order Status Update Webhook", timeout=60)
     wf.sticky("Overview – Workflow 05",
               "**Goal:** the store/courier system calls this webhook when an order status changes.\n\n"
               "`POST /webhook/order-update` with JSON body:\n"
@@ -683,7 +685,7 @@ def wf05():
 
 # ---------------------------------------------------------------- 06 inventory agent
 def wf06():
-    wf = WF("06 Inventory Agent (Stock + Purchase Orders)")
+    wf = WF("06 Inventory Agent (Stock + Purchase Orders)", timeout=150)
     prompt = (ROOT / "prompts" / "inventory_agent_prompt.md").read_text(encoding="utf-8").strip()
     wf.sticky("Overview – Workflow 06",
               "**Second domain-expert agent** (multi-agent). Called by the support agent (03) through the "

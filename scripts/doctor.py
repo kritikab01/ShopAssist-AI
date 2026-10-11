@@ -244,6 +244,21 @@ else:
     print("   check by hand: double-click 'Public Chat (UrbanThread)' in workflow 03 - its Chat URL must start "
           f"with http://localhost:{port}/")
 
+    # ---------------------------------------------------------------- 4c. stuck runs
+    st, run, _ = (lambda r: (r[0], r[1], None))(http("GET", f"{n8n}/api/v1/executions?status=running&limit=50", H, timeout=20))
+    running = run.get("data", []) if st == 200 and isinstance(run, dict) else []
+    if running:
+        print(f"   {len(running)} run(s) still RUNNING right now:")
+        for e in running[:5]:
+            print(f"     - started {str(e.get('startedAt', ''))[:19]}  {names.get(e.get('workflowId'), e.get('workflowId'))}")
+        old = [e for e in running if str(e.get("startedAt", ""))[:16] < datetime.datetime.utcnow().isoformat()[:16]]
+        todo.append("Stuck runs keep the local model busy, so every new question waits and times out. Clear them: "
+                    "in n8n open Executions and stop the running ones, or restart n8n:  "
+                    "cd ~/projects/shopassist-n8n && docker compose -f docker-compose.yml -f shopassist-webhook.override.yml restart  "
+                    "then:  ollama stop qwen2.5:3b   (re-import with python3 scripts/import_to_n8n.py adds time limits so this cannot happen again)")
+    else:
+        print("   no runs stuck")
+
     # ---------------------------------------------------------------- 5. recent errors
     print("\n5) Last failed n8n runs (newest first)")
     st, ex = http("GET", f"{n8n}/api/v1/executions?status=error&limit=5&includeData=true", H, timeout=30)

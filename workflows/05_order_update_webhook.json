@@ -200,7 +200,8 @@
   },
   "pinData": {},
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "executionTimeout": 60
   },
   "active": false,
   "tags": []
