@@ -417,8 +417,10 @@ def wf03():
             "  notes.push('The customer is upset or asks for a human: look up the order if an order ID is given, then you MUST call escalate_to_human and give the ticket ID.');\n"
             "if (/refund/.test(m) && /ut\\d{4}/.test(m))\n"
             "  notes.push('Refund request: call order_lookup; if the order amount is more than Rs 5000 you MUST call escalate_to_human (you cannot approve it) and give the ticket ID.');\n"
+            "if (/\\b(stock|in stock|available|availability|restock|reorder|purchase order|inventory|low stock)\\b/.test(m) && !/stock market/.test(m))\n"
+            "  notes.push('This is about stock or purchase orders: call inventory_expert with the full question and pass its answer on. Do not guess availability.');\n"
             "if (/python|javascript|java |code|script|program|homework|essay|poem|recipe|weather|cricket|movie|stock market|bitcoin/.test(m)\n"
-            "    && !/order|ut\\d{4}|return|refund|size|deliver|kurta|shirt|jeans|hoodie|stock/.test(m))\n"
+            "    && !/order|ut\\d{4}|return|refund|size|deliver|kurta|shirt|jeans|hoodie|in stock|restock|low stock/.test(m))\n"
             "  notes.push('This is NOT about UrbanThread. Do not answer it and do not write code: reply that you can only help with UrbanThread orders, returns, sizes, delivery, offers and stock.');\n"
             "return [{ json: { ...$json, chatInput: notes.length ? msg + '\\n\\n[NOTE FOR ASSISTANT: ' + notes.join(' ') + ']' : msg } }];\n"
         ),
@@ -699,7 +701,7 @@ def wf06():
         "agent": "toolsAgent",
         "promptType": "define",
         "text": "={{ $json.question }}",
-        "options": {"systemMessage": "=" + prompt, "maxIterations": 6},
+        "options": {"systemMessage": "=" + prompt, "maxIterations": 4},
     })
     llm = ollama_chat(wf, "Ollama Chat Model", (120, 260), temperature=0)
     stock = wf.node("stock_lookup", "n8n-nodes-base.postgresTool", 2.5, (320, 260), {

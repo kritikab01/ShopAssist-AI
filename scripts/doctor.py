@@ -128,6 +128,36 @@ else:
         st, r = http("POST", f"{oll}/api/embed", body={"model": "nomic-embed-text", "input": ["test"]}, timeout=120)
         print("   embeddings size:", len((r.get("embeddings") or [[]])[0]) if st == 200 else f"ERROR {clean(r)}")
 
+# ------------------------------------------------------------------ 3b. database (from .env)
+print("\n3b) Database (Supabase, values from .env)")
+try:
+    import sys as _sys
+    _sys.path.insert(0, str(ROOT / "scripts"))
+    from shopassist_common import db as _db
+    _con = _db()
+    for _t, _need in (("orders", 10), ("tickets", 0), ("products", 12), ("purchase_orders", 0), ("n8n_chat_histories", 0)):
+        try:
+            _n = _con.run(f"SELECT count(*) FROM {_t}")[0][0]
+            print(f"   {_t:20} {_n} rows")
+            if _n < _need:
+                todo.append(f"Table {_t} has too few rows - run: python3 scripts/setup_database.py")
+        except Exception:
+            print(f"   {_t:20} MISSING")
+            todo.append(f"Table {_t} is missing (the Inventory Agent needs products/purchase_orders) - run: python3 scripts/setup_database.py")
+            _con = _db()
+    _con.close()
+except Exception as _e:
+    _msg = str(_e)
+    print(f"   cannot connect: {clean(_msg)[:160]}")
+    if "tenant" in _msg or "not found" in _msg:
+        todo.append("POSTGRES_HOST / POSTGRES_USER in .env do not match your Supabase project. Copy Host and User exactly "
+                    "from n8n -> Credentials -> your Postgres credential (or Supabase -> Connect -> Session pooler), save .env, "
+                    "then run: python3 scripts/setup_database.py")
+    elif "pg8000" in _msg:
+        todo.append("Install the database driver: pip3 install pg8000")
+    else:
+        todo.append("Check POSTGRES_* in .env (Supabase -> Connect -> Session pooler)")
+
 # ------------------------------------------------------------------ 4. n8n
 print("\n4) n8n")
 n8n = (ENV.get("N8N_URL") or "http://localhost:5679").rstrip("/")
