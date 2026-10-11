@@ -11,12 +11,22 @@ All data (brand, customers, orders, phone numbers, policies) is **fictional**.
 
 ---
 
+## Submission files
+
+- **Report (Word):** [`docs/submission/ShopAssist_AI_Capstone_Report.docx`](docs/submission/ShopAssist_AI_Capstone_Report.docx)
+- **Technology Stack Guide (Word):** [`docs/submission/ShopAssist_AI_Tech_Stack_Guide.docx`](docs/submission/ShopAssist_AI_Tech_Stack_Guide.docx)
+- **Screenshots** (architecture, all six workflow canvases, two executions, web app): [`docs/screenshots/`](docs/screenshots/)
+- Markdown version of the report: [`docs/report.md`](docs/report.md)
+
+![Architecture](docs/screenshots/architecture.png)
+
 ## 1. Problem
 
 *UrbanThread* is a small online clothing store in India (prices in Rs). Its two support staff spend most
 of the day answering the same questions: *Where is my order? What is the return policy? Which size
 should I buy? Is COD available?* Replies are slow, angry customers wait in the same queue as simple
 questions, and nobody is alerted when an issue is urgent.
+
 
 ## 2. Solution
 
@@ -84,7 +94,7 @@ scripts/     build_workflows.py (regenerates workflows/*.json) · import_to_n8n.
 |----------|---------|--------------|
 | `01_ingest_faq_pdf.json` | Manual | Download FAQ PDF → Default Data Loader + Recursive splitter (1000/200) → Ollama embeddings (768) → Pinecone, `source=faq` |
 | `02_scrape_and_summarize.json` | Manual | Read `urls.txt` → HTTP Request each page → HTML extract → LLM summary → embeddings → Pinecone, `source=website`, `url` |
-| `03_support_agent_chat.json` | Public Chat | Tools Agent + Postgres Chat Memory + tools `faq_knowledge`, `website_knowledge`, `order_lookup`, `escalate_to_human`, `inventory_expert` (→ 06) |
+| `03_support_agent_chat.json` | Public Chat | Tools Agent + Postgres Chat Memory + tools `faq_knowledge`, `website_knowledge`, `order_lookup`, `escalate_to_human`, `inventory_expert` (→ 06); rule-based *Detect Intent* before and *guaranteed escalation* after the agent (creates the ticket via 04 if the model forgot) |
 | `04_escalation_subworkflow.json` | Called by 03 | LLM + Structured Output Parser → `tickets` insert → Slack → Twilio SMS → SMTP e-mail → returns ticket ID |
 | `05_order_update_webhook.json` | Webhook POST | Update order status → if `delayed`, SMS the customer → JSON response |
 | `06_inventory_agent.json` | Called by 03 | **Second AI agent** (Inventory): tools `stock_lookup` + `create_purchase_order` (Postgres) → Slack approval request → answer back to 03 |

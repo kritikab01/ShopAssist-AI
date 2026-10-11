@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 _gai = socket.getaddrinfo  # prefer IPv4 (some networks hang on IPv6)
 socket.getaddrinfo = lambda *a, **k: sorted(_gai(*a, **k), key=lambda r: r[0] != socket.AF_INET)
 todo = []
+recent_fails = []
 
 
 def env_file():
@@ -128,6 +129,56 @@ else:
         st, r = http("POST", f"{oll}/api/embed", body={"model": "nomic-embed-text", "input": ["test"]}, timeout=120)
         print("   embeddings size:", len((r.get("embeddings") or [[]])[0]) if st == 200 else f"ERROR {clean(r)}")
 
+# ------------------------------------------------------------------ 3b. database (from .env)
+print("\n3b) Database (Supabase, values from .env)")
+try:
+    import sys as _sys
+    _sys.path.insert(0, str(ROOT / "scripts"))
+    from shopassist_common import db as _db
+    _con = _db()
+    for _t, _need in (("orders", 10), ("tickets", 0), ("products", 12), ("purchase_orders", 0), ("n8n_chat_histories", 0)):
+        try:
+            _n = _con.run(f"SELECT count(*) FROM {_t}")[0][0]
+            print(f"   {_t:20} {_n} rows")
+            if _n < _need:
+                todo.append(f"Table {_t} has too few rows - run: python3 scripts/setup_database.py")
+        except Exception:
+            print(f"   {_t:20} MISSING")
+            todo.append(f"Table {_t} is missing (the Inventory Agent needs products/purchase_orders) - run: python3 scripts/setup_database.py")
+            _con = _db()
+    _con.close()
+except Exception as _e:
+    _msg = str(_e)
+    print(f"   cannot connect: {clean(_msg)[:160]}")
+    if "tenant" in _msg or "not found" in _msg:
+        todo.append("POSTGRES_HOST / POSTGRES_USER in .env do not match your Supabase project. Copy Host and User exactly "
+                    "from n8n -> Credentials -> your Postgres credential (or Supabase -> Connect -> Session pooler), save .env, "
+                    "then run: python3 scripts/setup_database.py")
+    elif "pg8000" in _msg:
+        todo.append("Install the database driver: pip3 install pg8000")
+    else:
+        todo.append("Check POSTGRES_* in .env (Supabase -> Connect -> Session pooler)")
+
+# ------------------------------------------------------------------ 3c. Pinecone knowledge base
+print("\n3c) Pinecone knowledge base")
+if not ENV.get("PINECONE_API_KEY"):
+    print("   PINECONE_API_KEY not in .env - skipped (fine: n8n uses its own Pinecone credential)")
+else:
+    PH = {"Api-Key": ENV["PINECONE_API_KEY"], "X-Pinecone-API-Version": "2025-01"}
+    st, r = http("GET", f"https://api.pinecone.io/indexes/{ENV.get('PINECONE_INDEX') or 'shopassist'}", PH)
+    if st != 200:
+        print(f"   index not reachable (HTTP {st})")
+        todo.append("Create the Pinecone index:  python3 scripts/setup_pinecone.py")
+    else:
+        dim = r.get("dimension")
+        st2, s2 = http("POST", f"https://{r['host']}/describe_index_stats", PH, {})
+        n = s2.get("totalVectorCount", s2.get("total_vector_count", 0)) if st2 == 200 else "?"
+        print(f"   index dimension {dim} (need 768), vectors stored: {n}  (~6 after workflow 01, more after 02)")
+        if dim != 768:
+            todo.append("Pinecone index has the wrong size:  python3 scripts/setup_pinecone.py  (makes it 768)")
+        elif n == 0:
+            todo.append("Knowledge base is EMPTY: in n8n run workflow 01, then 02 (Execute workflow) - FAQ and offers come from there")
+
 # ------------------------------------------------------------------ 4. n8n
 print("\n4) n8n")
 n8n = (ENV.get("N8N_URL") or "http://localhost:5679").rstrip("/")
@@ -146,11 +197,12 @@ elif st == 404 and "Cannot GET" in str(wfs):
 elif st != 200:
     print(f"   n8n API error HTTP {st}: {clean(wfs)[:200]}")
 else:
-    names = {}
+    names, updated = {}, {}
     for w in wfs.get("data", []):
         if w["name"][:3] not in ("01 ", "02 ", "03 ", "04 ", "05 ", "06 "):
             continue
         names[w["id"]] = w["name"]
+        updated[w["id"]] = str(w.get("updatedAt") or "")
         types = {n["type"].split(".")[-1] for n in w["nodes"]}
         ai = "OLLAMA" if types & {"lmChatOllama", "embeddingsOllama"} else (
             "GEMINI (old!)" if types & {"lmChatGoogleGemini", "embeddingsGoogleGemini"} else "-")
@@ -214,14 +266,33 @@ else:
     print("   check by hand: double-click 'Public Chat (UrbanThread)' in workflow 03 - its Chat URL must start "
           f"with http://localhost:{port}/")
 
+    # ---------------------------------------------------------------- 4c. stuck runs
+    st, run, _ = (lambda r: (r[0], r[1], None))(http("GET", f"{n8n}/api/v1/executions?status=running&limit=50", H, timeout=20))
+    running = run.get("data", []) if st == 200 and isinstance(run, dict) else []
+    if running:
+        print(f"   {len(running)} run(s) still RUNNING right now:")
+        for e in running[:5]:
+            print(f"     - started {str(e.get('startedAt', ''))[:19]}  {names.get(e.get('workflowId'), e.get('workflowId'))}")
+        old = [e for e in running if str(e.get("startedAt", ""))[:16] < datetime.datetime.utcnow().isoformat()[:16]]
+        todo.append("Stuck runs keep the local model busy, so every new question waits and times out. Clear them: "
+                    "in n8n open Executions and stop the running ones, or restart n8n:  "
+                    "cd ~/projects/shopassist-n8n && docker compose -f docker-compose.yml -f shopassist-webhook.override.yml restart  "
+                    "then:  ollama stop qwen2.5:3b   (re-import with python3 scripts/import_to_n8n.py adds time limits so this cannot happen again)")
+    else:
+        print("   no runs stuck")
+
     # ---------------------------------------------------------------- 5. recent errors
     print("\n5) Last failed n8n runs (newest first)")
-    st, ex = http("GET", f"{n8n}/api/v1/executions?status=error&limit=5&includeData=true", H, timeout=30)
+    st, ex = http("GET", f"{n8n}/api/v1/executions?status=error&limit=20&includeData=true", H, timeout=30)
+    # only errors of the CURRENT version of each workflow (older runs were fixed by an update)
+    fails = [e for e in (ex.get("data", []) if st == 200 else [])
+             if str(e.get("startedAt", "")) >= updated.get(e.get("workflowId"), "")][:5]
     if st != 200:
         print(f"   cannot read executions (HTTP {st})")
-    elif not ex.get("data"):
-        print("   none")
-    for e in ex.get("data", []) if st == 200 else []:
+    elif not fails:
+        print("   none since the workflows were last updated")
+    recent_fails.extend(fails)
+    for e in fails:
         rd = ((e.get("data") or {}).get("resultData") or {})
         err = rd.get("error") or {}
         node = rd.get("lastNodeExecuted") or (err.get("node") or {}).get("name", "?")
@@ -238,7 +309,9 @@ else:
         if "not found" in m.lower() and "model" in m.lower():
             todo.append("Model missing in Ollama:  ollama pull qwen2.5:3b  and  ollama pull nomic-embed-text")
 
-print("\nWHAT TO DO" + (":" if todo else ": nothing obvious found - run workflow 01 in n8n and paste the error."))
+if recent_fails and not todo:
+    todo.append("Read the newest error in section 5. If it is old (before your last fix), ignore it and run python3 scripts/evaluate.py")
+print("\nWHAT TO DO" + (":" if todo else ": nothing - all checks passed. Next: python3 scripts/evaluate.py"))
 seen = set()
 for i, t in enumerate([t for t in todo if not (t in seen or seen.add(t))], 1):
     print(f"   {i}. {t}")

@@ -43,8 +43,10 @@ SENDER_EMAIL = "your.gmail@gmail.com"  # placeholder: the Gmail account used in 
 class WF:
     """Tiny builder for an n8n workflow (nodes + connections)."""
 
-    def __init__(self, name):
-        self.name, self.nodes, self.connections = name, [], {}
+    def __init__(self, name, timeout=None):
+        # timeout (seconds): n8n stops a run that takes longer, so a stuck agent can never keep
+        # the local model busy and block every other question.
+        self.name, self.nodes, self.connections, self.timeout = name, [], {}, timeout
 
     def node(self, name, type_, version, pos, params=None, creds=None, **extra):
         n = {
@@ -79,7 +81,7 @@ class WF:
             "nodes": self.nodes,
             "connections": self.connections,
             "pinData": {},
-            "settings": {"executionOrder": "v1"},
+            "settings": {"executionOrder": "v1", **({"executionTimeout": self.timeout} if self.timeout else {})},
             "active": False,
             "tags": [],
         }
@@ -126,7 +128,9 @@ def workflow_tool(wf, name, pos, description, placeholder_id, fields):
         "workflowId": rl(placeholder_id, "id"),  # scripts/import_to_n8n.py fills in the real ID
         "workflowInputs": {
             "mappingMode": "defineBelow",
-            "value": {k: f"={{{{ $fromAI('{k}', '{v}', 'string') }}}}" for k, v in fields.items()},
+            # Every input has a default, so a small model that forgets one field cannot break the tool
+            # ("Received tool input did not match expected schema ... Required").
+            "value": {k: f"={{{{ $fromAI('{k}', '{v[0]}', 'string', '{v[1]}') }}}}" for k, v in fields.items()},
             "matchingColumns": [],
             "schema": [
                 {"id": k, "displayName": k, "required": False, "defaultMatch": False,
@@ -145,7 +149,7 @@ def metadata(*pairs):
 
 # ---------------------------------------------------------------- 01 ingest FAQ PDF
 def wf01():
-    wf = WF("01 Ingest FAQ PDF into Pinecone")
+    wf = WF("01 Ingest FAQ PDF into Pinecone", timeout=900)
     wf.sticky("Overview – Workflow 01",
               "**Goal:** load the store FAQ/policy PDF into the Pinecone index `shopassist` "
               "so the agent can search it (RAG).\n\n"
@@ -204,7 +208,7 @@ def wf01():
 
 # ---------------------------------------------------------------- 02 scrape + summarize
 def wf02():
-    wf = WF("02 Scrape Web Pages, Summarize and Store")
+    wf = WF("02 Scrape Web Pages, Summarize and Store", timeout=1200)
     wf.sticky("Overview – Workflow 02",
               "**Goal:** scrape store web pages, summarize each with the LLM, and store the summaries "
               "in Pinecone with metadata `source = website` and `url`.\n\n"
@@ -297,7 +301,7 @@ def wf02():
 
 # ---------------------------------------------------------------- 03 support agent
 def wf03():
-    wf = WF("03 ShopAssist Support Agent (Chat)")
+    wf = WF("03 ShopAssist Support Agent (Chat)", timeout=240)
     system_prompt = (ROOT / "prompts" / "agent_system_prompt.md").read_text(encoding="utf-8").strip()
 
     wf.sticky("Overview – Workflow 03",
@@ -308,10 +312,12 @@ def wf03():
               "- `order_lookup` – Postgres query by order ID or phone\n"
               "- `escalate_to_human` – calls workflow 04 (Slack + SMS + e-mail)\n"
               "- `inventory_expert` – asks the **Inventory Agent** (workflow 06) – multi-agent\n\n"
+              "**Guardrails:** *Detect Intent* (rules) before the agent; after it, if a human is needed and the "
+              "reply has no ticket ID, *Create Ticket (workflow 04)* runs anyway (guaranteed escalation).\n\n"
               "Memory: Postgres Chat Memory (table `n8n_chat_histories`, last 10 messages).\n\n"
               "Course: 1–4 (agents, n8n basics), 7–9 & 18 (RAG + metadata filter), 12–13 (sub-workflow tool), "
               "14–15 (agentic RAG, two knowledge bases), 16–17 (public chat), 19–20 (agent + Postgres).",
-              (-120, -460), w=600, h=400, color=4)
+              (-120, -520), w=600, h=460, color=4)
     chat = wf.node("Public Chat (UrbanThread)", "@n8n/n8n-nodes-langchain.chatTrigger", 1.1, (0, 0), {
         "public": True,
         "mode": "hostedChat",
@@ -329,7 +335,7 @@ def wf03():
         "agent": "toolsAgent",
         "promptType": "auto",
         "options": {"systemMessage": "=" + system_prompt, "maxIterations": 8},
-    })
+    }, onError="continueRegularOutput")  # if the model fails, the steps after it still send a useful reply
     llm = ollama_chat(wf, "Ollama Chat Model", (0, 300))
     mem = wf.node("Postgres Chat Memory", "@n8n/n8n-nodes-langchain.memoryPostgresChat", 1.3, (180, 300), {
         "tableName": "n8n_chat_histories",
@@ -352,13 +358,13 @@ def wf03():
 
     kb_tool("faq_knowledge", "faq",
             "Search the official UrbanThread store FAQ and policies: returns (15 days), refunds, "
-            "exchanges, sizes, delivery times and charges, COD, payments, cancellations.", 360)
+            "exchanges, sizes, delivery times and charges, COD, payments, cancellations.", 340)
     kb_tool("website_knowledge", "website",
             "Search summaries of UrbanThread web pages: courier partners, dispatch times, festive/Diwali "
             "delays, size and fit tips, offers and coupon codes, gift cards, loyalty points, garment care, "
-            "sustainability.", 560)
+            "sustainability.", 600)
 
-    orders = wf.node("order_lookup", "n8n-nodes-base.postgresTool", 2.5, (760, 300), {
+    orders = wf.node("order_lookup", "n8n-nodes-base.postgresTool", 2.5, (860, 300), {
         "descriptionType": "manual",
         "toolDescription": (
             "Look up a customer's order in the database. Input: exactly ONE order ID (like UT1003) "
@@ -369,7 +375,7 @@ def wf03():
         "query": (
             "-- $1 = order ID or phone number provided by the customer\n"
             "SELECT order_id, customer_name, items, amount_inr, payment_method, status, city,\n"
-            "       order_date, expected_delivery, courier, tracking_no\n"
+            "       order_date::text AS order_date, expected_delivery::text AS expected_delivery, courier, tracking_no\n"
             "FROM orders\n"
             "WHERE order_id = UPPER(TRIM($1))\n"
             "   OR RIGHT(phone, 10) = RIGHT(REGEXP_REPLACE($1, '[^0-9]', '', 'g'), 10)\n"
@@ -384,14 +390,16 @@ def wf03():
     }, ["postgres"])
     wf.link(orders, agent, "ai_tool")
 
-    fields = {
-        "customer_name": "Customer name, or Unknown",
-        "phone": "Customer phone number, or empty string",
-        "order_id": "Order ID like UT1003, or empty string",
-        "reason": "Why you are escalating: angry customer, refund over Rs 5,000, no answer found, or human requested",
-        "conversation_summary": "Short summary of the conversation and the exact problem of the customer",
+    fields = {  # name: (description for the model, default if the model leaves it out)
+        "customer_name": ("Customer name, or Unknown", "Unknown"),
+        "phone": ("Customer phone number, or empty string", ""),
+        "order_id": ("Order ID like UT1003, or empty string", ""),
+        "reason": ("Why you are escalating: angry customer, refund over Rs 5000, no answer found, or human requested",
+                   "Customer needs help from a human"),
+        "conversation_summary": ("Short summary of the conversation and the exact problem of the customer",
+                                 "See the chat history"),
     }
-    esc = workflow_tool(wf, "escalate_to_human", (960, 300), (
+    esc = workflow_tool(wf, "escalate_to_human", (1060, 300), (
         "Create a support ticket and alert the human support team (Slack, SMS, e-mail). Use when the "
         "customer is angry, wants a refund above Rs 5,000, asks for a human, or the answer is not in "
         "the knowledge bases. Returns the ticket ID to give to the customer."
@@ -399,13 +407,124 @@ def wf03():
     wf.link(esc, agent, "ai_tool")
 
     # Multi-agent: a second domain expert (workflow 06) is available to this agent as a tool.
-    inv = workflow_tool(wf, "inventory_expert", (1160, 300), (
+    inv = workflow_tool(wf, "inventory_expert", (1260, 300), (
         "Ask the Inventory Agent (domain expert for stock and procurement). Use for product availability, "
         "sizes in stock, low stock, restocking and purchase orders. Send the full question; it returns the answer."
-    ), "REPLACE_WITH_WORKFLOW_06_ID", {"question": "The full question about stock, availability, restocking or purchase orders"})
+    ), "REPLACE_WITH_WORKFLOW_06_ID", {"question": ("The full question about stock, availability, restocking or purchase orders", "Which products are low on stock?")})
     wf.link(inv, agent, "ai_tool")
 
-    wf.link(chat, agent)
+    # Small local models follow an explicit note far better than a long system prompt. This step spots clear
+    # signals (anger / wants a human, refund, out-of-scope) and adds a short instruction to the message.
+    guard = wf.node("Detect Intent (rules)", "n8n-nodes-base.code", 2, (180, 0), {
+        "jsCode": (
+            "// Rule-based pre-check: adds a NOTE for the agent when the message clearly needs a special action.\n"
+            "const msg = String($json.chatInput || '');\n"
+            "const m = msg.toLowerCase();\n"
+            "const notes = [];\n"
+            "if (/manager|human|real person|complain|worst|third time|angry|furious|ridiculous|fed up|cheat|fraud/.test(m))\n"
+            "  notes.push('The customer is upset or asks for a human: look up the order if an order ID is given, then you MUST call escalate_to_human and give the ticket ID.');\n"
+            "if (/refund/.test(m) && /ut\\d{4}/.test(m))\n"
+            "  notes.push('Refund request: call order_lookup; if the order amount is more than Rs 5000 you MUST call escalate_to_human (you cannot approve it) and give the ticket ID.');\n"
+            "if (/\\b(stock|in stock|available|availability|restock|reorder|purchase order|inventory|low stock)\\b/.test(m) && !/stock market/.test(m))\n"
+            "  notes.push('This is about stock or purchase orders: call inventory_expert with the full question and pass its answer on. Do not guess availability.');\n"
+            "if (/return|exchange|does not fit|doesn't fit|too (small|big|tight|loose)|wrong size/.test(m) && /ut\\d{4}/.test(m))\n"
+            "  notes.push('Return question about an order: call order_lookup for the order AND faq_knowledge for the return and refund policy, then answer with both (no stock check needed).');\n"
+            "if (/diwali|discount|coupon|promo|offer|sale|code|gift card|loyalty/.test(m) && !/python|javascript|script|program/.test(m))\n"
+            "  notes.push('Offers and coupon codes: call website_knowledge first and give ONLY codes that appear in its result. Never invent a code.');\n"
+            "if (/python|javascript|java |code|script|program|homework|essay|poem|recipe|weather|cricket|movie|stock market|bitcoin/.test(m)\n"
+            "    && !/order|ut\\d{4}|return|refund|size|deliver|kurta|shirt|jeans|hoodie|in stock|restock|low stock/.test(m))\n"
+            "  notes.push('This is NOT about UrbanThread. Do not answer it and do not write code: reply that you can only help with UrbanThread orders, returns, sizes, delivery, offers and stock.');\n"
+            "// Flags for the 'guaranteed escalation' step after the agent.\n"
+            "const oid = (msg.toUpperCase().match(/UT\\d{4}/) || [''])[0];\n"
+            "const phone = (msg.replace(/[\\s-]/g, '').match(/(\\+?91)?[6-9]\\d{9}/) || [''])[0];\n"
+            "const name = (msg.match(/\\b(?:i am|i'm|my name is|this is)\\s+([A-Z][a-z]+)/) || ['', ''])[1];\n"
+            "const flags = { escalate: /manager|human|real person|complain|worst|third time|angry|furious|ridiculous|fed up|cheat|fraud/.test(m),\n"
+            "  refund: /refund/.test(m), order_id: oid, phone, name, original: msg };\n"
+            "return [{ json: { ...$json, intent: flags, chatInput: notes.length ? msg + '\\n\\n[NOTE FOR ASSISTANT: ' + notes.join(' ') + ']' : msg } }];\n"
+        ),
+    })
+    wf.link(chat, guard)
+    wf.link(guard, agent)
+
+    # Guaranteed escalation: a small model sometimes says "I have escalated" without calling the tool.
+    # If the rules say a human is needed (angry / asks for a manager / refund over Rs 5,000) and the reply
+    # has no ticket ID, the workflow creates the ticket itself (workflow 04) and adds the ID to the reply.
+    INTENT = "$('Detect Intent (rules)').item.json.intent"
+    amount = wf.node("Order Details (for escalation check)", "n8n-nodes-base.postgres", 2.5, (720, -220), {
+        "operation": "executeQuery",
+        "query": (
+            "SELECT order_id, customer_name, phone, amount_inr, items, status, expected_delivery::text AS expected_delivery, courier, tracking_no\n"
+            "FROM orders\n"
+            "WHERE order_id = UPPER(TRIM($1)) LIMIT 1;"
+        ),
+        "options": {"queryReplacement": "={{ [ " + INTENT + ".order_id || 'none' ] }}"},
+    }, ["postgres"], alwaysOutputData=True, onError="continueRegularOutput")
+    decide = wf.node("Needs a Ticket? (rules)", "n8n-nodes-base.code", 2, (940, -220), {
+        "jsCode": (
+            "// Decide if a human ticket is required but the agent did not create one.\n"
+            "const intent = $('Detect Intent (rules)').first().json.intent || {};\n"
+            "const order = $json.order_id ? $json : {};\n"
+            "let reply = String($('ShopAssist AI Agent').first().json.output || '').trim();\n"
+            "if (!reply) {  // the AI step failed (e.g. bad tool call): answer from the database / rules instead\n"
+            "  const r = order.order_id ? $('Order Details (for escalation check)').first().json : null;\n"
+            "  reply = r ? `Your order ${r.order_id} (${r.items}) is ${String(r.status).replace(/_/g, ' ')}. Expected delivery: ${String(r.expected_delivery).slice(0, 10)}, courier ${r.courier}, tracking ${r.tracking_no}.`\n"
+            "    : (intent.escalate || intent.refund) ? 'I am sorry for the trouble. Let me connect you with our support team.'\n"
+            "    : 'Sorry, I could not process that just now. Please share your order ID (like UT1003) or ask about returns, sizes, delivery, offers or stock.';\n"
+            "}\n"
+            "const bigRefund = intent.refund && Number(order.amount_inr || 0) > 5000;\n"
+            "const needs = (intent.escalate || bigRefund) && !/TKT-\\d+/.test(reply);\n"
+            "const reason = intent.escalate ? 'Customer is upset or asked for a human' : 'Refund above Rs 5,000 needs human approval';\n"
+            "return [{ json: { needs_ticket: needs, reply,\n"
+            "  customer_name: intent.name || order.customer_name || 'Unknown',\n"
+            "  phone: intent.phone || order.phone || '',\n"
+            "  order_id: intent.order_id || '',\n"
+            "  reason,\n"
+            "  conversation_summary: (reason + '. Customer wrote: ' + String(intent.original || '')).slice(0, 1500) } }];\n"
+        ),
+    })
+    check = wf.node("Ticket Missing?", "n8n-nodes-base.if", 2.2, (1160, -220), {
+        "conditions": {
+            "options": {"caseSensitive": True, "leftValue": "", "typeValidation": "loose", "version": 2},
+            "conditions": [{"id": "c1", "leftValue": "={{ $json.needs_ticket }}", "rightValue": "",
+                            "operator": {"type": "boolean", "operation": "true", "singleValue": True}}],
+            "combinator": "and",
+        },
+        "options": {},
+    })
+    in_fields = ["customer_name", "phone", "order_id", "reason", "conversation_summary"]
+    create = wf.node("Create Ticket (workflow 04)", "n8n-nodes-base.executeWorkflow", 1.2, (1380, -320), {
+        "source": "database",
+        "workflowId": rl("REPLACE_WITH_WORKFLOW_04_ID", "id"),  # scripts/import_to_n8n.py fills in the real ID
+        "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {k: "={{ $json." + k + " }}" for k in in_fields},
+            "matchingColumns": [],
+            "schema": [{"id": k, "displayName": k, "required": False, "defaultMatch": False, "display": True,
+                        "canBeUsedToMatch": True, "type": "string", "removed": False} for k in in_fields],
+            "attemptToConvertTypes": False,
+            "convertFieldsToString": True,
+        },
+        "mode": "once",
+        "options": {"waitForSubWorkflow": True},
+    })
+    with_ticket = wf.node("Reply + Ticket ID", "n8n-nodes-base.set", 3.4, (1600, -320), {
+        "assignments": {"assignments": [{"id": "o1", "name": "output", "type": "string", "value": (
+            "={{ $('Needs a Ticket? (rules)').item.json.reply }}\n\nI have passed this to our human support "
+            "team. Your ticket ID is {{ $json.ticket_id }} - a team member will contact you within 4 business hours."
+        )}]},
+        "options": {},
+    })
+    plain = wf.node("Reply", "n8n-nodes-base.set", 3.4, (1380, -120), {
+        "assignments": {"assignments": [{"id": "o2", "name": "output", "type": "string",
+                                         "value": "={{ $json.reply }}"}]},
+        "options": {},
+    })
+    wf.link(agent, amount)
+    wf.link(amount, decide)
+    wf.link(decide, check)
+    wf.link(check, create, out_index=0)
+    wf.link(check, plain, out_index=1)
+    wf.link(create, with_ticket)
     wf.link(llm, agent, "ai_languageModel")
     wf.link(mem, agent, "ai_memory")
     wf.sticky("Setup notes",
@@ -414,13 +533,13 @@ def wf03():
               "3. **Activate** the workflow, open the Chat Trigger and copy the **public chat URL**.\n"
               "4. The system prompt lives in `prompts/agent_system_prompt.md` (rules: answer only from "
               "tools, cite source, ask for order ID, escalate if angry / refund > Rs 5,000 / no answer).",
-              (1380, -40), w=420, h=300)
+              (1480, 120), w=420, h=300)
     wf.save("03_support_agent_chat.json")
 
 
 # ---------------------------------------------------------------- 04 escalation sub-workflow
 def wf04():
-    wf = WF("04 Escalation Sub-workflow (Ticket + Slack + SMS + Email)")
+    wf = WF("04 Escalation Sub-workflow (Ticket + Slack + SMS + Email)", timeout=150)
     schema = (ROOT / "prompts" / "ticket_schema.json").read_text(encoding="utf-8")
     wf.sticky("Overview – Workflow 04",
               "**Called by** the `escalate_to_human` tool in workflow 03.\n\n"
@@ -440,7 +559,7 @@ def wf04():
                                        "conversation_summary"]]},
     })
     build = wf.node("Build Ticket (Structured Output)", "@n8n/n8n-nodes-langchain.chainLlm", 1.5,
-                    (220, 0), {
+                    (200, 0), {
                         "promptType": "define",
                         "text": (
                             "=You are a support team lead at UrbanThread (Indian online clothing store). "
@@ -465,23 +584,29 @@ def wf04():
                      (360, 240), {"schemaType": "manual", "inputSchema": schema})
     # Small local models sometimes skip a field or the {"output": ...} wrapper. This step fills any gap
     # from the agent's inputs, so a ticket is ALWAYS saved and the customer always gets a ticket ID.
-    norm = wf.node("Normalize Ticket (fallback)", "n8n-nodes-base.code", 2, (440, 0), {
+    norm = wf.node("Normalize Ticket (fallback)", "n8n-nodes-base.code", 2, (470, 0), {
         "jsCode": (
-            "// Take the AI ticket; fill anything missing from what the agent sent.\n"
+            "// Take the AI ticket; fill anything missing from what the agent sent, and make every value\n"
+            "// fit the database (allowed words + column lengths), so saving the ticket can never fail.\n"
             "const t = $json.output || {};\n"
             "const inp = $('When Called by Agent').first().json;\n"
-            "const reason = String(inp.reason || '').toLowerCase();\n"
+            "const text = (String(inp.reason || '') + ' ' + String(inp.conversation_summary || '')).toLowerCase();\n"
+            "const pick = (v, allowed, dflt) => { v = String(v || '').toLowerCase().trim();\n"
+            "  return allowed.includes(v) ? v : (allowed.find(a => v.includes(a)) || dflt); };\n"
             "let phone = String(t.phone || inp.phone || '').replace(/[^0-9+]/g, '');\n"
             "if (/^[0-9]{10}$/.test(phone)) phone = '+91' + phone;  // Indian 10-digit number -> E.164\n"
+            "const oid = (String(t.order_id || '') + ' ' + String(inp.order_id || '') + ' ' + text).toUpperCase().match(/UT\\d{4}/);\n"
+            "const issueGuess = text.includes('refund') ? 'refund' : text.includes('late') || text.includes('delay') ? 'delivery' : 'other';\n"
+            "const angry = /angry|manager|worst|third time|furious|complain/.test(text);\n"
             "return [{ json: { output: {\n"
-            "  customer_name: t.customer_name || inp.customer_name || 'Unknown',\n"
-            "  phone,\n"
-            "  order_id: String(t.order_id || inp.order_id || '').toUpperCase(),\n"
-            "  issue_type: t.issue_type || (reason.includes('refund') ? 'refund' : 'other'),\n"
-            "  sentiment: t.sentiment || (reason.includes('angry') ? 'angry' : 'neutral'),\n"
-            "  priority: t.priority || 'high',\n"
-            "  summary: t.summary || inp.conversation_summary || inp.reason || '',\n"
-            "  suggested_action: t.suggested_action || 'Contact the customer and review the chat.',\n"
+            "  customer_name: String(t.customer_name || inp.customer_name || 'Unknown').slice(0, 100),\n"
+            "  phone: phone.slice(0, 20),\n"
+            "  order_id: oid ? oid[0] : '',\n"
+            "  issue_type: pick(t.issue_type, ['refund', 'return', 'delivery', 'damaged_item', 'payment', 'size', 'other'], issueGuess),\n"
+            "  sentiment: pick(t.sentiment, ['positive', 'neutral', 'negative', 'angry'], angry ? 'angry' : 'negative'),\n"
+            "  priority: pick(t.priority, ['low', 'medium', 'high'], 'high'),\n"
+            "  summary: String(t.summary || inp.conversation_summary || inp.reason || '').slice(0, 2000),\n"
+            "  suggested_action: String(t.suggested_action || 'Contact the customer and review the chat.').slice(0, 1000),\n"
             "} } }];\n"
         ),
     })
@@ -572,7 +697,7 @@ def wf04():
 
 # ---------------------------------------------------------------- 05 order update webhook
 def wf05():
-    wf = WF("05 Order Status Update Webhook")
+    wf = WF("05 Order Status Update Webhook", timeout=60)
     wf.sticky("Overview – Workflow 05",
               "**Goal:** the store/courier system calls this webhook when an order status changes.\n\n"
               "`POST /webhook/order-update` with JSON body:\n"
@@ -656,7 +781,7 @@ def wf05():
 
 # ---------------------------------------------------------------- 06 inventory agent
 def wf06():
-    wf = WF("06 Inventory Agent (Stock + Purchase Orders)")
+    wf = WF("06 Inventory Agent (Stock + Purchase Orders)", timeout=150)
     prompt = (ROOT / "prompts" / "inventory_agent_prompt.md").read_text(encoding="utf-8").strip()
     wf.sticky("Overview – Workflow 06",
               "**Second domain-expert agent** (multi-agent). Called by the support agent (03) through the "
@@ -674,7 +799,7 @@ def wf06():
         "agent": "toolsAgent",
         "promptType": "define",
         "text": "={{ $json.question }}",
-        "options": {"systemMessage": "=" + prompt, "maxIterations": 6},
+        "options": {"systemMessage": "=" + prompt, "maxIterations": 4},
     })
     llm = ollama_chat(wf, "Ollama Chat Model", (120, 260), temperature=0)
     stock = wf.node("stock_lookup", "n8n-nodes-base.postgresTool", 2.5, (320, 260), {
@@ -714,8 +839,12 @@ def wf06():
         "operation": "executeQuery",
         "query": (
             "INSERT INTO purchase_orders (sku, quantity, supplier, est_cost_inr, reason)\n"
-            "SELECT p.sku, $2::int, p.supplier, p.unit_cost_inr * $2::int, $3\n"
-            "FROM products p WHERE p.sku = UPPER(TRIM($1))\n"
+            "SELECT p.sku, q.qty, p.supplier, p.unit_cost_inr * q.qty, $3\n"
+            "FROM products p\n"
+            "-- never less than the reorder rule: (2 x reorder_level - stock), rounded up to a multiple of 5\n"
+            "CROSS JOIN LATERAL (SELECT GREATEST(COALESCE($2::int, 0),\n"
+            "                   (CEIL(GREATEST(2 * p.reorder_level - p.stock, 5) / 5.0) * 5)::int) AS qty) q\n"
+            "WHERE p.sku = UPPER(TRIM($1))\n"
             "RETURNING po_id, sku, quantity, supplier, est_cost_inr, status;"
         ),
         "options": {"queryReplacement": (
