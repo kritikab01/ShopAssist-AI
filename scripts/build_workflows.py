@@ -375,7 +375,7 @@ def wf03():
         "query": (
             "-- $1 = order ID or phone number provided by the customer\n"
             "SELECT order_id, customer_name, items, amount_inr, payment_method, status, city,\n"
-            "       order_date, expected_delivery, courier, tracking_no\n"
+            "       order_date::text AS order_date, expected_delivery::text AS expected_delivery, courier, tracking_no\n"
             "FROM orders\n"
             "WHERE order_id = UPPER(TRIM($1))\n"
             "   OR RIGHT(phone, 10) = RIGHT(REGEXP_REPLACE($1, '[^0-9]', '', 'g'), 10)\n"
@@ -427,6 +427,8 @@ def wf03():
             "  notes.push('Refund request: call order_lookup; if the order amount is more than Rs 5000 you MUST call escalate_to_human (you cannot approve it) and give the ticket ID.');\n"
             "if (/\\b(stock|in stock|available|availability|restock|reorder|purchase order|inventory|low stock)\\b/.test(m) && !/stock market/.test(m))\n"
             "  notes.push('This is about stock or purchase orders: call inventory_expert with the full question and pass its answer on. Do not guess availability.');\n"
+            "if (/return|exchange|does not fit|doesn't fit|too (small|big|tight|loose)|wrong size/.test(m) && /ut\\d{4}/.test(m))\n"
+            "  notes.push('Return question about an order: call order_lookup for the order AND faq_knowledge for the return and refund policy, then answer with both (no stock check needed).');\n"
             "if (/diwali|discount|coupon|promo|offer|sale|code|gift card|loyalty/.test(m) && !/python|javascript|script|program/.test(m))\n"
             "  notes.push('Offers and coupon codes: call website_knowledge first and give ONLY codes that appear in its result. Never invent a code.');\n"
             "if (/python|javascript|java |code|script|program|homework|essay|poem|recipe|weather|cricket|movie|stock market|bitcoin/.test(m)\n"
@@ -451,7 +453,7 @@ def wf03():
     amount = wf.node("Order Details (for escalation check)", "n8n-nodes-base.postgres", 2.5, (720, -220), {
         "operation": "executeQuery",
         "query": (
-            "SELECT order_id, customer_name, phone, amount_inr, items, status, expected_delivery, courier, tracking_no\n"
+            "SELECT order_id, customer_name, phone, amount_inr, items, status, expected_delivery::text AS expected_delivery, courier, tracking_no\n"
             "FROM orders\n"
             "WHERE order_id = UPPER(TRIM($1)) LIMIT 1;"
         ),
@@ -837,8 +839,12 @@ def wf06():
         "operation": "executeQuery",
         "query": (
             "INSERT INTO purchase_orders (sku, quantity, supplier, est_cost_inr, reason)\n"
-            "SELECT p.sku, $2::int, p.supplier, p.unit_cost_inr * $2::int, $3\n"
-            "FROM products p WHERE p.sku = UPPER(TRIM($1))\n"
+            "SELECT p.sku, q.qty, p.supplier, p.unit_cost_inr * q.qty, $3\n"
+            "FROM products p\n"
+            "-- never less than the reorder rule: (2 x reorder_level - stock), rounded up to a multiple of 5\n"
+            "CROSS JOIN LATERAL (SELECT GREATEST(COALESCE($2::int, 0),\n"
+            "                   (CEIL(GREATEST(2 * p.reorder_level - p.stock, 5) / 5.0) * 5)::int) AS qty) q\n"
+            "WHERE p.sku = UPPER(TRIM($1))\n"
             "RETURNING po_id, sku, quantity, supplier, est_cost_inr, status;"
         ),
         "options": {"queryReplacement": (

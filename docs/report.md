@@ -130,22 +130,29 @@ See `docs/course_mapping.md` for the full session-by-session table. Summary of t
 Test plan: `docs/test_questions.md` (14 chat tests + 2 webhook tests). The 14 chat tests are run and scored
 automatically by `python3 scripts/evaluate.py`; paste the table from `docs/evaluation_results.md` here.
 
-**Automatic evaluation score:** _x / 14 passed, average answer time _y_ s (local qwen2.5:3b)._
+**Automatic evaluation score: 14 / 14 passed, average answer time 10 s** (local qwen2.5:3b through Ollama on a
+MacBook Air, run on 11 Oct 2026). Before the guardrails were added the score was 9 / 14.
 
-| # | Test | Expected | Actual | Pass |
-|---|------|----------|--------|------|
-| 1 | FAQ – return policy | 15-day policy, cites FAQ | | |
-| 2 | Website – Diwali code | DIWALI25, cites page URL | | |
-| 3 | Order lookup UT1002 | shipped, Delhivery, tracking | | |
-| 4 | Combined UT1005 return + refund | order + FAQ, both cited | | |
-| 5 | Missing order ID | asks for ID/phone | | |
-| 6 | Angry customer UT1003 | ticket + Slack + SMS + e-mail | | |
-| 7 | Out of scope | polite refusal, no ticket | | |
-| 8 | Refund > Rs 5,000 (UT1004) | escalation, priority high | | |
-| 9–11 | One-word messages (UT1003, returns, diwali) | right tool, short answer | | |
-| 12–14 | Inventory Agent (availability, low stock, purchase order) | stock answer, PO-000N | | |
-| W1 | Webhook delayed UT1002 | DB updated + SMS | | |
-| W2 | Webhook unknown order | `ok: false` | | |
+| # | Test | Expected | Actual (shortened) | Time | Pass |
+|---|------|----------|--------------------|------|------|
+| 1 | FAQ – return policy | 15-day policy | "return items within 15 days from the date of delivery..." | 23 s | ✅ |
+| 2 | Website – Diwali code | DIWALI25 | "DIWALI25 – 25% off orders over Rs 2,499 from 20 October..." | 10 s | ✅ |
+| 3 | Order lookup UT1002 | shipped, Delhivery | "Your order UT1002 is in the Shipped status. 1 Linen Kurta (S)..." | 5 s | ✅ |
+| 4 | Combined UT1005 return + refund | order + 15-day policy + refund | mentions 15 days and refund, but also an unrelated "out of stock" remark | 14 s | ✅* |
+| 5 | Missing order ID | asks for ID/phone | "Could you please provide your order ID or phone number?" | 3 s | ✅ |
+| 6 | Angry customer UT1003 | ticket ID | order UT1003 delayed (Ekart) + ticket TKT-0007 (Rohan Gupta, delivery, high) | 13 s | ✅ |
+| 7 | Out of scope (Python script) | polite refusal, no code | "...only help with UrbanThread orders, returns, sizes, delivery, offers and stock." | 2 s | ✅ |
+| 8 | Refund > Rs 5,000 (UT1004) | escalation | "refund amount exceeds Rs 5000, I need to escalate..." – ticket TKT-0008 (Sneha Iyer, refund, high) | 12 s | ✅ |
+| 9 | One word: `UT1003` | order status | "Your order UT1003 is delayed..." (Ekart) | 7 s | ✅ |
+| 10 | One word: `returns` | 15-day policy | "Returns and exchanges are processed within 15 days..." | 16 s | ✅ |
+| 11 | One word: `diwali` | DIWALI25 | "Diwali offers ... 20 October to 5 November 2026 – DIWALI25: 25% off..." | 14 s | ✅ |
+| 12 | Inventory: kurta size M | in stock | "The linen kurta is in stock and available in size M." | 5 s | ✅ |
+| 13 | Inventory: low stock | low-stock SKUs | "products at or below their reorder level: Basics Cotton T-shirt (L): Stock 6..." | 12 s | ✅ |
+| 14 | Inventory: purchase order | PO-000N | "A purchase order (PO-0002) has been created for Rs 1,800" | 7 s | ✅* |
+| W1 | Webhook delayed UT1002 | DB updated + SMS | tested in setup (`scripts/test_chat.py`) | – | ✅ |
+| W2 | Webhook unknown order | `ok: false` | tested in setup | – | ✅ |
+
+\* passed the automatic check, but a human reading found a wrong detail (see observations).
 
 **Screenshots** (add to `docs/screenshots/` and link here):
 
@@ -155,13 +162,53 @@ automatically by `python3 scripts/evaluate.py`; paste the table from `docs/evalu
 - [ ] Fig 7 – SMS received · [ ] Fig 8 – Escalation e-mail · [ ] Fig 9 – `tickets` table in Supabase
 - [ ] Fig 10 – Webhook test response · [ ] Fig 11 – Pinecone index with metadata
 
-**Observations:** _(e.g. average response time, number of tool calls per question, any wrong answers and why)._
+**Observations:**
+
+- **Speed:** 2–23 s per answer on a laptop, 10 s on average. Knowledge-base answers (1, 10) are slowest because they
+  need an embedding call, a Pinecone search and a longer answer. Database answers (3, 5, 12) take 3–5 s.
+- **Guardrails made the difference.** The first run scored 9 / 14. Two failures (6, 8) came from the small model
+  *saying* it had escalated without calling the tool, one (2) from an invented coupon code, and two (13, 14) from
+  time-outs. Model instructions alone did not fix these. Deterministic rules did: the *Detect Intent* pre-check,
+  the *guaranteed escalation* step after the agent, the ticket *Normalize* step, time limits on every workflow,
+  and default values for tool inputs. **Business rules that matter (escalation, refund limit) are enforced in the
+  workflow, not left to the model.**
+- **Wrong details found by reading the answers.** Keyword scoring misses these:
+  - Test 4 added an unrelated "out of stock" sentence. Fix: a pre-check note that sends return questions to
+    `order_lookup` + `faq_knowledge` only.
+  - Test 6 gave the delivery date one day early (time-zone shift of a DATE column). Fix: dates are returned as text.
+  - Test 14 ordered 10 units and said "restocked". Fix: the SQL now never orders fewer units than the rule
+    (2 × reorder level − stock, rounded up to 5 → 35 units), and the agent must call it a *draft awaiting approval*.
+- **Multi-agent works:** the support agent passed stock questions to the Inventory Agent (12–14), which queried
+  the `products` table and drafted a purchase order in `purchase_orders`.
 
 ### Business KPIs
 
-Generated by `python3 scripts/kpi_report.py` (paste `docs/kpi_report.md` here): conversations handled by the AI,
-tickets escalated to humans (by type and priority), share of conversations resolved without a human,
-products below reorder level and purchase orders drafted by the Inventory Agent.
+From `python3 scripts/kpi_report.py` on the live Supabase database (11 Oct 2026, testing period):
+
+| KPI | Value |
+|---|---|
+| Conversations handled by the AI | **44** (48 customer messages) |
+| Escalated to a human (tickets) | **8** – all high priority, all open |
+| Conversations resolved without a human (approx.) | **82 %** |
+| Products at or below reorder level | **5** of 12 |
+| Purchase orders drafted by the Inventory Agent | **2** (pending approval) |
+
+| Tickets by type | Count |
+|---|---|
+| refund (high) | 6 |
+| delivery (high) | 2 |
+
+| Low-stock SKU | Product | Stock / reorder level |
+|---|---|---|
+| TSH-BAS-L | Basics Cotton T-shirt (L) | 6 / 20 |
+| JNS-RLX-28 | Relaxed Jeans (28) | 0 / 10 |
+| KUR-LIN-S | Linen Kurta (S) | 3 / 8 |
+| PLZ-COT-S | Cotton Palazzo (S) | 4 / 8 |
+| HOD-OVR-XL | Oversized Hoodie (XL) | 9 / 10 |
+
+Orders: 10 worth Rs 30,285 (3 shipped, 2 delivered, 1 delayed, 1 out for delivery, 1 placed, 1 returned,
+1 cancelled). The numbers come from repeated testing, not real customers. In live use, the "resolved without a
+human" share is the main KPI: about 4 in 5 conversations needed no staff time.
 
 ## 7. Limitations
 
