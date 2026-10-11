@@ -11,12 +11,22 @@ All data (brand, customers, orders, phone numbers, policies) is **fictional**.
 
 ---
 
+## Submission files
+
+- **Report (Word):** [`docs/submission/ShopAssist_AI_Capstone_Report.docx`](docs/submission/ShopAssist_AI_Capstone_Report.docx)
+- **Technology Stack Guide (Word):** [`docs/submission/ShopAssist_AI_Tech_Stack_Guide.docx`](docs/submission/ShopAssist_AI_Tech_Stack_Guide.docx)
+- **Screenshots** (architecture, all six workflow canvases, two executions, web app): [`docs/screenshots/`](docs/screenshots/)
+- Markdown version of the report: [`docs/report.md`](docs/report.md)
+
+![Architecture](docs/screenshots/architecture.png)
+
 ## 1. Problem
 
 *UrbanThread* is a small online clothing store in India (prices in Rs). Its two support staff spend most
 of the day answering the same questions: *Where is my order? What is the return policy? Which size
 should I buy? Is COD available?* Replies are slow, angry customers wait in the same queue as simple
 questions, and nobody is alerted when an issue is urgent.
+
 
 ## 2. Solution
 

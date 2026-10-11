@@ -358,13 +358,13 @@ def wf03():
 
     kb_tool("faq_knowledge", "faq",
             "Search the official UrbanThread store FAQ and policies: returns (15 days), refunds, "
-            "exchanges, sizes, delivery times and charges, COD, payments, cancellations.", 360)
+            "exchanges, sizes, delivery times and charges, COD, payments, cancellations.", 340)
     kb_tool("website_knowledge", "website",
             "Search summaries of UrbanThread web pages: courier partners, dispatch times, festive/Diwali "
             "delays, size and fit tips, offers and coupon codes, gift cards, loyalty points, garment care, "
-            "sustainability.", 560)
+            "sustainability.", 600)
 
-    orders = wf.node("order_lookup", "n8n-nodes-base.postgresTool", 2.5, (760, 300), {
+    orders = wf.node("order_lookup", "n8n-nodes-base.postgresTool", 2.5, (860, 300), {
         "descriptionType": "manual",
         "toolDescription": (
             "Look up a customer's order in the database. Input: exactly ONE order ID (like UT1003) "
@@ -399,7 +399,7 @@ def wf03():
         "conversation_summary": ("Short summary of the conversation and the exact problem of the customer",
                                  "See the chat history"),
     }
-    esc = workflow_tool(wf, "escalate_to_human", (960, 300), (
+    esc = workflow_tool(wf, "escalate_to_human", (1060, 300), (
         "Create a support ticket and alert the human support team (Slack, SMS, e-mail). Use when the "
         "customer is angry, wants a refund above Rs 5,000, asks for a human, or the answer is not in "
         "the knowledge bases. Returns the ticket ID to give to the customer."
@@ -407,7 +407,7 @@ def wf03():
     wf.link(esc, agent, "ai_tool")
 
     # Multi-agent: a second domain expert (workflow 06) is available to this agent as a tool.
-    inv = workflow_tool(wf, "inventory_expert", (1160, 300), (
+    inv = workflow_tool(wf, "inventory_expert", (1260, 300), (
         "Ask the Inventory Agent (domain expert for stock and procurement). Use for product availability, "
         "sizes in stock, low stock, restocking and purchase orders. Send the full question; it returns the answer."
     ), "REPLACE_WITH_WORKFLOW_06_ID", {"question": ("The full question about stock, availability, restocking or purchase orders", "Which products are low on stock?")})
@@ -533,7 +533,7 @@ def wf03():
               "3. **Activate** the workflow, open the Chat Trigger and copy the **public chat URL**.\n"
               "4. The system prompt lives in `prompts/agent_system_prompt.md` (rules: answer only from "
               "tools, cite source, ask for order ID, escalate if angry / refund > Rs 5,000 / no answer).",
-              (1380, -40), w=420, h=300)
+              (1480, 120), w=420, h=300)
     wf.save("03_support_agent_chat.json")
 
 
@@ -559,7 +559,7 @@ def wf04():
                                        "conversation_summary"]]},
     })
     build = wf.node("Build Ticket (Structured Output)", "@n8n/n8n-nodes-langchain.chainLlm", 1.5,
-                    (220, 0), {
+                    (200, 0), {
                         "promptType": "define",
                         "text": (
                             "=You are a support team lead at UrbanThread (Indian online clothing store). "
@@ -584,7 +584,7 @@ def wf04():
                      (360, 240), {"schemaType": "manual", "inputSchema": schema})
     # Small local models sometimes skip a field or the {"output": ...} wrapper. This step fills any gap
     # from the agent's inputs, so a ticket is ALWAYS saved and the customer always gets a ticket ID.
-    norm = wf.node("Normalize Ticket (fallback)", "n8n-nodes-base.code", 2, (440, 0), {
+    norm = wf.node("Normalize Ticket (fallback)", "n8n-nodes-base.code", 2, (470, 0), {
         "jsCode": (
             "// Take the AI ticket; fill anything missing from what the agent sent, and make every value\n"
             "// fit the database (allowed words + column lengths), so saving the ticket can never fail.\n"

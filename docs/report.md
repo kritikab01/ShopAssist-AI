@@ -25,21 +25,21 @@ COD rules. This causes:
 2. Let customers check order status with an order ID or phone number.
 3. Detect cases that need a human (anger, refund > Rs 5,000, unknown answer) and hand them over with a structured ticket and instant alerts (Slack, SMS, e-mail).
 4. Notify customers by SMS automatically when an order is delayed.
-5. Build it in n8n in 4–5 hours, using every topic of the course, with **zero budget**: all services are free tiers and no credit card is needed.
+5. Build it in n8n using every topic of the course, with **zero budget**: local AI (Ollama) and free tiers, no credit card needed.
 
 ## 3. Architecture
 
-_(Paste the Mermaid diagram from the README here, or a screenshot of it rendered on GitHub.)_
+![Architecture](screenshots/architecture.png)
 
 | Layer | Technology |
 |-------|-----------|
-| Orchestration / agent | n8n Cloud – AI Agent (Tools Agent) |
+| Orchestration / agent | n8n 2.x self-hosted in Docker – AI Agent (Tools Agent) |
 | LLM | Ollama `qwen2.5:3b`, running locally (free, no API key, supports tool calling) |
 | Embeddings | Ollama `nomic-embed-text` (768 dims, local) |
 | Vector DB | Pinecone index `shopassist` (768 dims, cosine), metadata `source`, `url`, `title` |
 | Database + memory | Supabase Postgres (`orders`, `tickets`, `n8n_chat_histories`) |
 | Notifications | Slack API, Twilio SMS, Gmail SMTP |
-| Interface | n8n public hosted chat; webhook for the order system |
+| Interface | n8n public hosted chat, web app with live dashboard (port 8501), Terminal chat; webhook for the order system |
 
 ## 4. Workflow-by-workflow explanation
 
