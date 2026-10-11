@@ -310,10 +310,12 @@ def wf03():
               "- `order_lookup` – Postgres query by order ID or phone\n"
               "- `escalate_to_human` – calls workflow 04 (Slack + SMS + e-mail)\n"
               "- `inventory_expert` – asks the **Inventory Agent** (workflow 06) – multi-agent\n\n"
+              "**Guardrails:** *Detect Intent* (rules) before the agent; after it, if a human is needed and the "
+              "reply has no ticket ID, *Create Ticket (workflow 04)* runs anyway (guaranteed escalation).\n\n"
               "Memory: Postgres Chat Memory (table `n8n_chat_histories`, last 10 messages).\n\n"
               "Course: 1–4 (agents, n8n basics), 7–9 & 18 (RAG + metadata filter), 12–13 (sub-workflow tool), "
               "14–15 (agentic RAG, two knowledge bases), 16–17 (public chat), 19–20 (agent + Postgres).",
-              (-120, -460), w=600, h=400, color=4)
+              (-120, -520), w=600, h=460, color=4)
     chat = wf.node("Public Chat (UrbanThread)", "@n8n/n8n-nodes-langchain.chatTrigger", 1.1, (0, 0), {
         "public": True,
         "mode": "hostedChat",
@@ -421,14 +423,95 @@ def wf03():
             "  notes.push('Refund request: call order_lookup; if the order amount is more than Rs 5000 you MUST call escalate_to_human (you cannot approve it) and give the ticket ID.');\n"
             "if (/\\b(stock|in stock|available|availability|restock|reorder|purchase order|inventory|low stock)\\b/.test(m) && !/stock market/.test(m))\n"
             "  notes.push('This is about stock or purchase orders: call inventory_expert with the full question and pass its answer on. Do not guess availability.');\n"
+            "if (/diwali|discount|coupon|promo|offer|sale|code|gift card|loyalty/.test(m) && !/python|javascript|script|program/.test(m))\n"
+            "  notes.push('Offers and coupon codes: call website_knowledge first and give ONLY codes that appear in its result. Never invent a code.');\n"
             "if (/python|javascript|java |code|script|program|homework|essay|poem|recipe|weather|cricket|movie|stock market|bitcoin/.test(m)\n"
             "    && !/order|ut\\d{4}|return|refund|size|deliver|kurta|shirt|jeans|hoodie|in stock|restock|low stock/.test(m))\n"
             "  notes.push('This is NOT about UrbanThread. Do not answer it and do not write code: reply that you can only help with UrbanThread orders, returns, sizes, delivery, offers and stock.');\n"
-            "return [{ json: { ...$json, chatInput: notes.length ? msg + '\\n\\n[NOTE FOR ASSISTANT: ' + notes.join(' ') + ']' : msg } }];\n"
+            "// Flags for the 'guaranteed escalation' step after the agent.\n"
+            "const oid = (msg.toUpperCase().match(/UT\\d{4}/) || [''])[0];\n"
+            "const phone = (msg.replace(/[\\s-]/g, '').match(/(\\+?91)?[6-9]\\d{9}/) || [''])[0];\n"
+            "const name = (msg.match(/\\b(?:i am|i'm|my name is|this is)\\s+([A-Z][a-z]+)/) || ['', ''])[1];\n"
+            "const flags = { escalate: /manager|human|real person|complain|worst|third time|angry|furious|ridiculous|fed up|cheat|fraud/.test(m),\n"
+            "  refund: /refund/.test(m), order_id: oid, phone, name, original: msg };\n"
+            "return [{ json: { ...$json, intent: flags, chatInput: notes.length ? msg + '\\n\\n[NOTE FOR ASSISTANT: ' + notes.join(' ') + ']' : msg } }];\n"
         ),
     })
     wf.link(chat, guard)
     wf.link(guard, agent)
+
+    # Guaranteed escalation: a small model sometimes says "I have escalated" without calling the tool.
+    # If the rules say a human is needed (angry / asks for a manager / refund over Rs 5,000) and the reply
+    # has no ticket ID, the workflow creates the ticket itself (workflow 04) and adds the ID to the reply.
+    INTENT = "$('Detect Intent (rules)').item.json.intent"
+    amount = wf.node("Order Details (for escalation check)", "n8n-nodes-base.postgres", 2.5, (720, -220), {
+        "operation": "executeQuery",
+        "query": (
+            "SELECT order_id, customer_name, phone, amount_inr FROM orders\n"
+            "WHERE order_id = UPPER(TRIM($1)) LIMIT 1;"
+        ),
+        "options": {"queryReplacement": "={{ [ " + INTENT + ".order_id || 'none' ] }}"},
+    }, ["postgres"], alwaysOutputData=True, onError="continueRegularOutput")
+    decide = wf.node("Needs a Ticket? (rules)", "n8n-nodes-base.code", 2, (940, -220), {
+        "jsCode": (
+            "// Decide if a human ticket is required but the agent did not create one.\n"
+            "const intent = $('Detect Intent (rules)').first().json.intent || {};\n"
+            "const reply = String($('ShopAssist AI Agent').first().json.output || '');\n"
+            "const order = $json.order_id ? $json : {};\n"
+            "const bigRefund = intent.refund && Number(order.amount_inr || 0) > 5000;\n"
+            "const needs = (intent.escalate || bigRefund) && !/TKT-\\d+/.test(reply);\n"
+            "const reason = intent.escalate ? 'Customer is upset or asked for a human' : 'Refund above Rs 5,000 needs human approval';\n"
+            "return [{ json: { needs_ticket: needs, reply,\n"
+            "  customer_name: intent.name || order.customer_name || 'Unknown',\n"
+            "  phone: intent.phone || order.phone || '',\n"
+            "  order_id: intent.order_id || '',\n"
+            "  reason,\n"
+            "  conversation_summary: (reason + '. Customer wrote: ' + String(intent.original || '')).slice(0, 1500) } }];\n"
+        ),
+    })
+    check = wf.node("Ticket Missing?", "n8n-nodes-base.if", 2.2, (1160, -220), {
+        "conditions": {
+            "options": {"caseSensitive": True, "leftValue": "", "typeValidation": "loose", "version": 2},
+            "conditions": [{"id": "c1", "leftValue": "={{ $json.needs_ticket }}", "rightValue": "",
+                            "operator": {"type": "boolean", "operation": "true", "singleValue": True}}],
+            "combinator": "and",
+        },
+        "options": {},
+    })
+    in_fields = ["customer_name", "phone", "order_id", "reason", "conversation_summary"]
+    create = wf.node("Create Ticket (workflow 04)", "n8n-nodes-base.executeWorkflow", 1.2, (1380, -320), {
+        "source": "database",
+        "workflowId": rl("REPLACE_WITH_WORKFLOW_04_ID", "id"),  # scripts/import_to_n8n.py fills in the real ID
+        "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {k: "={{ $json." + k + " }}" for k in in_fields},
+            "matchingColumns": [],
+            "schema": [{"id": k, "displayName": k, "required": False, "defaultMatch": False, "display": True,
+                        "canBeUsedToMatch": True, "type": "string", "removed": False} for k in in_fields],
+            "attemptToConvertTypes": False,
+            "convertFieldsToString": True,
+        },
+        "mode": "once",
+        "options": {"waitForSubWorkflow": True},
+    })
+    with_ticket = wf.node("Reply + Ticket ID", "n8n-nodes-base.set", 3.4, (1600, -320), {
+        "assignments": {"assignments": [{"id": "o1", "name": "output", "type": "string", "value": (
+            "={{ $('Needs a Ticket? (rules)').item.json.reply }}\n\nI have passed this to our human support "
+            "team. Your ticket ID is {{ $json.ticket_id }} - a team member will contact you within 4 business hours."
+        )}]},
+        "options": {},
+    })
+    plain = wf.node("Reply", "n8n-nodes-base.set", 3.4, (1380, -120), {
+        "assignments": {"assignments": [{"id": "o2", "name": "output", "type": "string",
+                                         "value": "={{ $json.reply }}"}]},
+        "options": {},
+    })
+    wf.link(agent, amount)
+    wf.link(amount, decide)
+    wf.link(decide, check)
+    wf.link(check, create, out_index=0)
+    wf.link(check, plain, out_index=1)
+    wf.link(create, with_ticket)
     wf.link(llm, agent, "ai_languageModel")
     wf.link(mem, agent, "ai_memory")
     wf.sticky("Setup notes",

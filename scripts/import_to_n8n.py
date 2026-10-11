@@ -28,7 +28,7 @@ WF_DIR = Path(__file__).resolve().parent.parent / "workflows"
 ORDER = ["04_escalation_subworkflow.json", "06_inventory_agent.json", "03_support_agent_chat.json",
          "01_ingest_faq_pdf.json", "02_scrape_and_summarize.json", "05_order_update_webhook.json"]
 # Agent tools in 03 that call another workflow: tool node name -> workflow file it must point to.
-LINKS = {"escalate_to_human": "04_escalation_subworkflow.json", "inventory_expert": "06_inventory_agent.json"}
+LINKS = {"escalate_to_human": "04_escalation_subworkflow.json", "Create Ticket (workflow 04)": "04_escalation_subworkflow.json", "inventory_expert": "06_inventory_agent.json"}
 
 # Read .env from the repo folder (no `source .env` needed; values with spaces are fine).
 _env = Path(__file__).resolve().parent.parent / ".env"

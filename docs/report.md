@@ -70,6 +70,14 @@ The system prompt (`prompts/agent_system_prompt.md`) forces the agent to answer 
 source, ask for an order ID when needed, refuse out-of-scope questions and escalate when the customer is
 angry, the refund is above Rs 5,000, or no answer is found. Choosing *which* knowledge base to query per
 question is the agentic-RAG part of the project.
+
+**Guardrails around the agent (deterministic, no AI).** A small local model does not always follow the
+prompt, so two rule-based steps wrap it. *Detect Intent* (before the agent) adds a short note to the message
+for anger or a request for a human, refunds, stock questions, offers and coupon codes ("search the website,
+never invent a code") and off-topic requests. *Guaranteed escalation* (after the agent) works like this: if the
+customer is upset or asks for a human, or asks for a refund on an order above Rs 5,000 (amount read from
+Postgres), and the reply has no `TKT-` ticket ID, the workflow calls workflow 04 itself and adds the ticket ID
+to the reply. This is a human-in-the-loop safety net. Escalation never depends on the model alone.
 _Screenshot: chat conversation + agent execution log showing tool calls._
 
 ### 4.4 Workflow 04 – Escalation sub-workflow
