@@ -19,6 +19,10 @@ Capstone project: n8n customer-support agent for a fictional store (UrbanThread)
 - 03 guardrails: Detect Intent code node (notes + `intent` flags) before the agent; after it, Order Details
   (Postgres) -> Needs a Ticket? -> IF -> Create Ticket (executeWorkflow 1.2 -> 04, linked by import LINKS)
   -> output + TKT id. Verified in sandbox: angry/refund>5000 get one ticket, no duplicates, UT1005 refund none.
+- Robustness: every toolWorkflow $fromAI input has a default (user hit 'Received tool input did not match
+  expected schema - Required conversation_summary'); agent node is onError continue, and 'Needs a Ticket?' builds
+  a reply from the order row / rules when the agent fails. doctor.py hides failed runs older than the workflow's
+  updatedAt and shows Pinecone vector count (3c) when PINECONE_API_KEY is in .env.
 - Runbook for the user: `docs/RUNBOOK.md`. Tools: setup_database.py, import_to_n8n.py, doctor.py,
   test_chat.py, chat_cli.py (interactive), evaluate.py (14 scored tests), kpi_report.py, app/server.py
   (web app :8501, chat + live dashboard; posts to N8N_URL so n8n's WEBHOOK_URL port problem does not matter).

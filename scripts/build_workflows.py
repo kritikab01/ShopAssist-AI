@@ -128,7 +128,9 @@ def workflow_tool(wf, name, pos, description, placeholder_id, fields):
         "workflowId": rl(placeholder_id, "id"),  # scripts/import_to_n8n.py fills in the real ID
         "workflowInputs": {
             "mappingMode": "defineBelow",
-            "value": {k: f"={{{{ $fromAI('{k}', '{v}', 'string') }}}}" for k, v in fields.items()},
+            # Every input has a default, so a small model that forgets one field cannot break the tool
+            # ("Received tool input did not match expected schema ... Required").
+            "value": {k: f"={{{{ $fromAI('{k}', '{v[0]}', 'string', '{v[1]}') }}}}" for k, v in fields.items()},
             "matchingColumns": [],
             "schema": [
                 {"id": k, "displayName": k, "required": False, "defaultMatch": False,
@@ -333,7 +335,7 @@ def wf03():
         "agent": "toolsAgent",
         "promptType": "auto",
         "options": {"systemMessage": "=" + system_prompt, "maxIterations": 8},
-    })
+    }, onError="continueRegularOutput")  # if the model fails, the steps after it still send a useful reply
     llm = ollama_chat(wf, "Ollama Chat Model", (0, 300))
     mem = wf.node("Postgres Chat Memory", "@n8n/n8n-nodes-langchain.memoryPostgresChat", 1.3, (180, 300), {
         "tableName": "n8n_chat_histories",
@@ -388,12 +390,14 @@ def wf03():
     }, ["postgres"])
     wf.link(orders, agent, "ai_tool")
 
-    fields = {
-        "customer_name": "Customer name, or Unknown",
-        "phone": "Customer phone number, or empty string",
-        "order_id": "Order ID like UT1003, or empty string",
-        "reason": "Why you are escalating: angry customer, refund over Rs 5,000, no answer found, or human requested",
-        "conversation_summary": "Short summary of the conversation and the exact problem of the customer",
+    fields = {  # name: (description for the model, default if the model leaves it out)
+        "customer_name": ("Customer name, or Unknown", "Unknown"),
+        "phone": ("Customer phone number, or empty string", ""),
+        "order_id": ("Order ID like UT1003, or empty string", ""),
+        "reason": ("Why you are escalating: angry customer, refund over Rs 5000, no answer found, or human requested",
+                   "Customer needs help from a human"),
+        "conversation_summary": ("Short summary of the conversation and the exact problem of the customer",
+                                 "See the chat history"),
     }
     esc = workflow_tool(wf, "escalate_to_human", (960, 300), (
         "Create a support ticket and alert the human support team (Slack, SMS, e-mail). Use when the "
@@ -406,7 +410,7 @@ def wf03():
     inv = workflow_tool(wf, "inventory_expert", (1160, 300), (
         "Ask the Inventory Agent (domain expert for stock and procurement). Use for product availability, "
         "sizes in stock, low stock, restocking and purchase orders. Send the full question; it returns the answer."
-    ), "REPLACE_WITH_WORKFLOW_06_ID", {"question": "The full question about stock, availability, restocking or purchase orders"})
+    ), "REPLACE_WITH_WORKFLOW_06_ID", {"question": ("The full question about stock, availability, restocking or purchase orders", "Which products are low on stock?")})
     wf.link(inv, agent, "ai_tool")
 
     # Small local models follow an explicit note far better than a long system prompt. This step spots clear
@@ -447,7 +451,8 @@ def wf03():
     amount = wf.node("Order Details (for escalation check)", "n8n-nodes-base.postgres", 2.5, (720, -220), {
         "operation": "executeQuery",
         "query": (
-            "SELECT order_id, customer_name, phone, amount_inr FROM orders\n"
+            "SELECT order_id, customer_name, phone, amount_inr, items, status, expected_delivery, courier, tracking_no\n"
+            "FROM orders\n"
             "WHERE order_id = UPPER(TRIM($1)) LIMIT 1;"
         ),
         "options": {"queryReplacement": "={{ [ " + INTENT + ".order_id || 'none' ] }}"},
@@ -456,8 +461,14 @@ def wf03():
         "jsCode": (
             "// Decide if a human ticket is required but the agent did not create one.\n"
             "const intent = $('Detect Intent (rules)').first().json.intent || {};\n"
-            "const reply = String($('ShopAssist AI Agent').first().json.output || '');\n"
             "const order = $json.order_id ? $json : {};\n"
+            "let reply = String($('ShopAssist AI Agent').first().json.output || '').trim();\n"
+            "if (!reply) {  // the AI step failed (e.g. bad tool call): answer from the database / rules instead\n"
+            "  const r = order.order_id ? $('Order Details (for escalation check)').first().json : null;\n"
+            "  reply = r ? `Your order ${r.order_id} (${r.items}) is ${String(r.status).replace(/_/g, ' ')}. Expected delivery: ${String(r.expected_delivery).slice(0, 10)}, courier ${r.courier}, tracking ${r.tracking_no}.`\n"
+            "    : (intent.escalate || intent.refund) ? 'I am sorry for the trouble. Let me connect you with our support team.'\n"
+            "    : 'Sorry, I could not process that just now. Please share your order ID (like UT1003) or ask about returns, sizes, delivery, offers or stock.';\n"
+            "}\n"
             "const bigRefund = intent.refund && Number(order.amount_inr || 0) > 5000;\n"
             "const needs = (intent.escalate || bigRefund) && !/TKT-\\d+/.test(reply);\n"
             "const reason = intent.escalate ? 'Customer is upset or asked for a human' : 'Refund above Rs 5,000 needs human approval';\n"

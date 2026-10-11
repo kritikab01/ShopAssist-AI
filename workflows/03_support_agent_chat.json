@@ -54,7 +54,8 @@
       "position": [
         360,
         0
-      ]
+      ],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -251,11 +252,11 @@
         "workflowInputs": {
           "mappingMode": "defineBelow",
           "value": {
-            "customer_name": "={{ $fromAI('customer_name', 'Customer name, or Unknown', 'string') }}",
-            "phone": "={{ $fromAI('phone', 'Customer phone number, or empty string', 'string') }}",
-            "order_id": "={{ $fromAI('order_id', 'Order ID like UT1003, or empty string', 'string') }}",
-            "reason": "={{ $fromAI('reason', 'Why you are escalating: angry customer, refund over Rs 5,000, no answer found, or human requested', 'string') }}",
-            "conversation_summary": "={{ $fromAI('conversation_summary', 'Short summary of the conversation and the exact problem of the customer', 'string') }}"
+            "customer_name": "={{ $fromAI('customer_name', 'Customer name, or Unknown', 'string', 'Unknown') }}",
+            "phone": "={{ $fromAI('phone', 'Customer phone number, or empty string', 'string', '') }}",
+            "order_id": "={{ $fromAI('order_id', 'Order ID like UT1003, or empty string', 'string', '') }}",
+            "reason": "={{ $fromAI('reason', 'Why you are escalating: angry customer, refund over Rs 5000, no answer found, or human requested', 'string', 'Customer needs help from a human') }}",
+            "conversation_summary": "={{ $fromAI('conversation_summary', 'Short summary of the conversation and the exact problem of the customer', 'string', 'See the chat history') }}"
           },
           "matchingColumns": [],
           "schema": [
@@ -335,7 +336,7 @@
         "workflowInputs": {
           "mappingMode": "defineBelow",
           "value": {
-            "question": "={{ $fromAI('question', 'The full question about stock, availability, restocking or purchase orders', 'string') }}"
+            "question": "={{ $fromAI('question', 'The full question about stock, availability, restocking or purchase orders', 'string', 'Which products are low on stock?') }}"
           },
           "matchingColumns": [],
           "schema": [
@@ -379,7 +380,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT order_id, customer_name, phone, amount_inr FROM orders\nWHERE order_id = UPPER(TRIM($1)) LIMIT 1;",
+        "query": "SELECT order_id, customer_name, phone, amount_inr, items, status, expected_delivery, courier, tracking_no\nFROM orders\nWHERE order_id = UPPER(TRIM($1)) LIMIT 1;",
         "options": {
           "queryReplacement": "={{ [ $('Detect Intent (rules)').item.json.intent.order_id || 'none' ] }}"
         }
@@ -403,7 +404,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Decide if a human ticket is required but the agent did not create one.\nconst intent = $('Detect Intent (rules)').first().json.intent || {};\nconst reply = String($('ShopAssist AI Agent').first().json.output || '');\nconst order = $json.order_id ? $json : {};\nconst bigRefund = intent.refund && Number(order.amount_inr || 0) > 5000;\nconst needs = (intent.escalate || bigRefund) && !/TKT-\\d+/.test(reply);\nconst reason = intent.escalate ? 'Customer is upset or asked for a human' : 'Refund above Rs 5,000 needs human approval';\nreturn [{ json: { needs_ticket: needs, reply,\n  customer_name: intent.name || order.customer_name || 'Unknown',\n  phone: intent.phone || order.phone || '',\n  order_id: intent.order_id || '',\n  reason,\n  conversation_summary: (reason + '. Customer wrote: ' + String(intent.original || '')).slice(0, 1500) } }];\n"
+        "jsCode": "// Decide if a human ticket is required but the agent did not create one.\nconst intent = $('Detect Intent (rules)').first().json.intent || {};\nconst order = $json.order_id ? $json : {};\nlet reply = String($('ShopAssist AI Agent').first().json.output || '').trim();\nif (!reply) {  // the AI step failed (e.g. bad tool call): answer from the database / rules instead\n  const r = order.order_id ? $('Order Details (for escalation check)').first().json : null;\n  reply = r ? `Your order ${r.order_id} (${r.items}) is ${String(r.status).replace(/_/g, ' ')}. Expected delivery: ${String(r.expected_delivery).slice(0, 10)}, courier ${r.courier}, tracking ${r.tracking_no}.`\n    : (intent.escalate || intent.refund) ? 'I am sorry for the trouble. Let me connect you with our support team.'\n    : 'Sorry, I could not process that just now. Please share your order ID (like UT1003) or ask about returns, sizes, delivery, offers or stock.';\n}\nconst bigRefund = intent.refund && Number(order.amount_inr || 0) > 5000;\nconst needs = (intent.escalate || bigRefund) && !/TKT-\\d+/.test(reply);\nconst reason = intent.escalate ? 'Customer is upset or asked for a human' : 'Refund above Rs 5,000 needs human approval';\nreturn [{ json: { needs_ticket: needs, reply,\n  customer_name: intent.name || order.customer_name || 'Unknown',\n  phone: intent.phone || order.phone || '',\n  order_id: intent.order_id || '',\n  reason,\n  conversation_summary: (reason + '. Customer wrote: ' + String(intent.original || '')).slice(0, 1500) } }];\n"
       },
       "id": "34bac979-d404-511a-9cc2-081a637866fc",
       "name": "Needs a Ticket? (rules)",

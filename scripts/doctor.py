@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 _gai = socket.getaddrinfo  # prefer IPv4 (some networks hang on IPv6)
 socket.getaddrinfo = lambda *a, **k: sorted(_gai(*a, **k), key=lambda r: r[0] != socket.AF_INET)
 todo = []
+recent_fails = []
 
 
 def env_file():
@@ -158,6 +159,26 @@ except Exception as _e:
     else:
         todo.append("Check POSTGRES_* in .env (Supabase -> Connect -> Session pooler)")
 
+# ------------------------------------------------------------------ 3c. Pinecone knowledge base
+print("\n3c) Pinecone knowledge base")
+if not ENV.get("PINECONE_API_KEY"):
+    print("   PINECONE_API_KEY not in .env - skipped (fine: n8n uses its own Pinecone credential)")
+else:
+    PH = {"Api-Key": ENV["PINECONE_API_KEY"], "X-Pinecone-API-Version": "2025-01"}
+    st, r = http("GET", f"https://api.pinecone.io/indexes/{ENV.get('PINECONE_INDEX') or 'shopassist'}", PH)
+    if st != 200:
+        print(f"   index not reachable (HTTP {st})")
+        todo.append("Create the Pinecone index:  python3 scripts/setup_pinecone.py")
+    else:
+        dim = r.get("dimension")
+        st2, s2 = http("POST", f"https://{r['host']}/describe_index_stats", PH, {})
+        n = s2.get("totalVectorCount", s2.get("total_vector_count", 0)) if st2 == 200 else "?"
+        print(f"   index dimension {dim} (need 768), vectors stored: {n}  (~6 after workflow 01, more after 02)")
+        if dim != 768:
+            todo.append("Pinecone index has the wrong size:  python3 scripts/setup_pinecone.py  (makes it 768)")
+        elif n == 0:
+            todo.append("Knowledge base is EMPTY: in n8n run workflow 01, then 02 (Execute workflow) - FAQ and offers come from there")
+
 # ------------------------------------------------------------------ 4. n8n
 print("\n4) n8n")
 n8n = (ENV.get("N8N_URL") or "http://localhost:5679").rstrip("/")
@@ -176,11 +197,12 @@ elif st == 404 and "Cannot GET" in str(wfs):
 elif st != 200:
     print(f"   n8n API error HTTP {st}: {clean(wfs)[:200]}")
 else:
-    names = {}
+    names, updated = {}, {}
     for w in wfs.get("data", []):
         if w["name"][:3] not in ("01 ", "02 ", "03 ", "04 ", "05 ", "06 "):
             continue
         names[w["id"]] = w["name"]
+        updated[w["id"]] = str(w.get("updatedAt") or "")
         types = {n["type"].split(".")[-1] for n in w["nodes"]}
         ai = "OLLAMA" if types & {"lmChatOllama", "embeddingsOllama"} else (
             "GEMINI (old!)" if types & {"lmChatGoogleGemini", "embeddingsGoogleGemini"} else "-")
@@ -261,12 +283,16 @@ else:
 
     # ---------------------------------------------------------------- 5. recent errors
     print("\n5) Last failed n8n runs (newest first)")
-    st, ex = http("GET", f"{n8n}/api/v1/executions?status=error&limit=5&includeData=true", H, timeout=30)
+    st, ex = http("GET", f"{n8n}/api/v1/executions?status=error&limit=20&includeData=true", H, timeout=30)
+    # only errors of the CURRENT version of each workflow (older runs were fixed by an update)
+    fails = [e for e in (ex.get("data", []) if st == 200 else [])
+             if str(e.get("startedAt", "")) >= updated.get(e.get("workflowId"), "")][:5]
     if st != 200:
         print(f"   cannot read executions (HTTP {st})")
-    elif not ex.get("data"):
-        print("   none")
-    for e in ex.get("data", []) if st == 200 else []:
+    elif not fails:
+        print("   none since the workflows were last updated")
+    recent_fails.extend(fails)
+    for e in fails:
         rd = ((e.get("data") or {}).get("resultData") or {})
         err = rd.get("error") or {}
         node = rd.get("lastNodeExecuted") or (err.get("node") or {}).get("name", "?")
@@ -283,7 +309,9 @@ else:
         if "not found" in m.lower() and "model" in m.lower():
             todo.append("Model missing in Ollama:  ollama pull qwen2.5:3b  and  ollama pull nomic-embed-text")
 
-print("\nWHAT TO DO" + (":" if todo else ": nothing obvious found - run workflow 01 in n8n and paste the error."))
+if recent_fails and not todo:
+    todo.append("Read the newest error in section 5. If it is old (before your last fix), ignore it and run python3 scripts/evaluate.py")
+print("\nWHAT TO DO" + (":" if todo else ": nothing - all checks passed. Next: python3 scripts/evaluate.py"))
 seen = set()
 for i, t in enumerate([t for t in todo if not (t in seen or seen.add(t))], 1):
     print(f"   {i}. {t}")
