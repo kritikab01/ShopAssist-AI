@@ -405,7 +405,26 @@ def wf03():
     ), "REPLACE_WITH_WORKFLOW_06_ID", {"question": "The full question about stock, availability, restocking or purchase orders"})
     wf.link(inv, agent, "ai_tool")
 
-    wf.link(chat, agent)
+    # Small local models follow an explicit note far better than a long system prompt. This step spots clear
+    # signals (anger / wants a human, refund, out-of-scope) and adds a short instruction to the message.
+    guard = wf.node("Detect Intent (rules)", "n8n-nodes-base.code", 2, (180, 0), {
+        "jsCode": (
+            "// Rule-based pre-check: adds a NOTE for the agent when the message clearly needs a special action.\n"
+            "const msg = String($json.chatInput || '');\n"
+            "const m = msg.toLowerCase();\n"
+            "const notes = [];\n"
+            "if (/manager|human|real person|complain|worst|third time|angry|furious|ridiculous|fed up|cheat|fraud/.test(m))\n"
+            "  notes.push('The customer is upset or asks for a human: look up the order if an order ID is given, then you MUST call escalate_to_human and give the ticket ID.');\n"
+            "if (/refund/.test(m) && /ut\\d{4}/.test(m))\n"
+            "  notes.push('Refund request: call order_lookup; if the order amount is more than Rs 5000 you MUST call escalate_to_human (you cannot approve it) and give the ticket ID.');\n"
+            "if (/python|javascript|java |code|script|program|homework|essay|poem|recipe|weather|cricket|movie|stock market|bitcoin/.test(m)\n"
+            "    && !/order|ut\\d{4}|return|refund|size|deliver|kurta|shirt|jeans|hoodie|stock/.test(m))\n"
+            "  notes.push('This is NOT about UrbanThread. Do not answer it and do not write code: reply that you can only help with UrbanThread orders, returns, sizes, delivery, offers and stock.');\n"
+            "return [{ json: { ...$json, chatInput: notes.length ? msg + '\\n\\n[NOTE FOR ASSISTANT: ' + notes.join(' ') + ']' : msg } }];\n"
+        ),
+    })
+    wf.link(chat, guard)
+    wf.link(guard, agent)
     wf.link(llm, agent, "ai_languageModel")
     wf.link(mem, agent, "ai_memory")
     wf.sticky("Setup notes",
@@ -467,21 +486,27 @@ def wf04():
     # from the agent's inputs, so a ticket is ALWAYS saved and the customer always gets a ticket ID.
     norm = wf.node("Normalize Ticket (fallback)", "n8n-nodes-base.code", 2, (440, 0), {
         "jsCode": (
-            "// Take the AI ticket; fill anything missing from what the agent sent.\n"
+            "// Take the AI ticket; fill anything missing from what the agent sent, and make every value\n"
+            "// fit the database (allowed words + column lengths), so saving the ticket can never fail.\n"
             "const t = $json.output || {};\n"
             "const inp = $('When Called by Agent').first().json;\n"
-            "const reason = String(inp.reason || '').toLowerCase();\n"
+            "const text = (String(inp.reason || '') + ' ' + String(inp.conversation_summary || '')).toLowerCase();\n"
+            "const pick = (v, allowed, dflt) => { v = String(v || '').toLowerCase().trim();\n"
+            "  return allowed.includes(v) ? v : (allowed.find(a => v.includes(a)) || dflt); };\n"
             "let phone = String(t.phone || inp.phone || '').replace(/[^0-9+]/g, '');\n"
             "if (/^[0-9]{10}$/.test(phone)) phone = '+91' + phone;  // Indian 10-digit number -> E.164\n"
+            "const oid = (String(t.order_id || '') + ' ' + String(inp.order_id || '') + ' ' + text).toUpperCase().match(/UT\\d{4}/);\n"
+            "const issueGuess = text.includes('refund') ? 'refund' : text.includes('late') || text.includes('delay') ? 'delivery' : 'other';\n"
+            "const angry = /angry|manager|worst|third time|furious|complain/.test(text);\n"
             "return [{ json: { output: {\n"
-            "  customer_name: t.customer_name || inp.customer_name || 'Unknown',\n"
-            "  phone,\n"
-            "  order_id: String(t.order_id || inp.order_id || '').toUpperCase(),\n"
-            "  issue_type: t.issue_type || (reason.includes('refund') ? 'refund' : 'other'),\n"
-            "  sentiment: t.sentiment || (reason.includes('angry') ? 'angry' : 'neutral'),\n"
-            "  priority: t.priority || 'high',\n"
-            "  summary: t.summary || inp.conversation_summary || inp.reason || '',\n"
-            "  suggested_action: t.suggested_action || 'Contact the customer and review the chat.',\n"
+            "  customer_name: String(t.customer_name || inp.customer_name || 'Unknown').slice(0, 100),\n"
+            "  phone: phone.slice(0, 20),\n"
+            "  order_id: oid ? oid[0] : '',\n"
+            "  issue_type: pick(t.issue_type, ['refund', 'return', 'delivery', 'damaged_item', 'payment', 'size', 'other'], issueGuess),\n"
+            "  sentiment: pick(t.sentiment, ['positive', 'neutral', 'negative', 'angry'], angry ? 'angry' : 'negative'),\n"
+            "  priority: pick(t.priority, ['low', 'medium', 'high'], 'high'),\n"
+            "  summary: String(t.summary || inp.conversation_summary || inp.reason || '').slice(0, 2000),\n"
+            "  suggested_action: String(t.suggested_action || 'Contact the customer and review the chat.').slice(0, 1000),\n"
             "} } }];\n"
         ),
     })
