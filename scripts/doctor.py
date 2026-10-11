@@ -102,7 +102,8 @@ else:
     for n, line in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
         if "=" in line and not line.strip().startswith("#"):
             val = line.split("=", 1)[1].split(" #")[0].strip()
-            if " " in val and not (val.startswith('"') or val.startswith("'")):
+            key = line.split("=", 1)[0].strip()
+            if " " in val and not (val.startswith('"') or val.startswith("'")) and "PASSWORD" not in key:
                 print(f"   line {n} ({line.split('=')[0].strip()}): value contains a space - remove extra words after it")
     if "GOOGLE_GEMINI_API_KEY" in ENV:
         print("   (GOOGLE_GEMINI_API_KEY is no longer used - you can delete that line)")
@@ -154,6 +155,8 @@ else:
         missing = [n["name"] for n in w["nodes"] if not n.get("credentials") and n["type"].split(".")[-1] in
                    ("vectorStorePinecone", "embeddingsOllama", "lmChatOllama", "postgres", "postgresTool",
                     "memoryPostgresChat", "slack", "twilio", "emailSend")]
+        if not w.get("active") and w["name"][:2] in ("03", "04", "05", "06"):
+            todo.append(f"Publish workflow {w['name'][:2]} in n8n (order: 04, 06, then 03, 05)")
         print(f"   {w['name'][:44]:44} AI={ai:13} {'published' if w.get('active') else 'not published':13}"
               f"{' missing credential: ' + ', '.join(missing) if missing else ''}")
     st, creds = http("GET", f"{n8n}/api/v1/credentials?limit=100", H)
@@ -187,8 +190,8 @@ else:
         found = True
         print(f"   n8n runs in Docker container '{name}' ({ports.strip()}); WEBHOOK_URL={hook or '(not set)'}")
         if f":{port}" not in hook:
-            todo.append(f"Chat messages go to the wrong port. Restart the n8n container '{name}' with "
-                        f"-e WEBHOOK_URL=http://localhost:{port}/  (see README > Troubleshooting > Failed to receive response)")
+            todo.append(f"Chat messages go to the wrong port. Fix (keeps all data, makes a backup):  "
+                        f"bash scripts/fix_webhook_url.sh {name} {port}")
     if not found:
         ps = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True).stdout
         for line in ps.splitlines():

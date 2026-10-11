@@ -62,16 +62,15 @@ python3 scripts/kpi_report.py                # business KPIs -> docs/kpi_report.
 Copy both tables into `docs/report.md` (sections 6 and 7) and take screenshots of the app.
 
 ## 9. Fix n8n's own chat window ("Error: Failed to receive response", Logs empty)
-n8n sends chat messages to its **webhook URL**. In Docker with `-p 5679:5678` it thinks that is port 5678.
-Check: workflow 03 → double-click *Public Chat (UrbanThread)* → the Chat URL must start with
-`http://localhost:5679/`. If not, restart the container with the webhook URL set (data is kept in the volume):
+n8n sends chat messages to its **webhook URL**. Your container `shopassist-n8n` maps `5679 -> 5678` without
+`WEBHOOK_URL`, so n8n thinks it lives on 5678. One command fixes it (keeps volumes, ports, settings and the
+encryption key; the old container is kept as a backup and restored automatically if anything fails):
 ```bash
-docker ps                                      # note NAME and the -v volume of the n8n container
-docker stop <NAME> && docker rm <NAME>         # removes only the container, not your data volume
-docker run -d --name <NAME> -p 5679:5678 -v <VOLUME>:/home/node/.n8n \
-  -e WEBHOOK_URL=http://localhost:5679/ docker.n8n.io/n8nio/n8n
+bash scripts/fix_webhook_url.sh shopassist-n8n 5679 --dry-run   # look first (changes nothing)
+bash scripts/fix_webhook_url.sh shopassist-n8n 5679             # apply
 ```
-(The terminal tools and the web app in steps 6–7 do not need this fix.)
+Then workflow 03 -> double-click *Public Chat (UrbanThread)*: the Chat URL now starts with `http://localhost:5679/`.
+(The terminal tools and the web app in steps 6–7 work without this fix.)
 
 ## 10. Part B (optional) – real notifications
 Replace the placeholder Slack / Twilio / SMTP credentials in n8n with real ones, set the Twilio *From*
