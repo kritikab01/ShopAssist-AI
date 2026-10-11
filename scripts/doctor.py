@@ -139,8 +139,12 @@ if st == 0:
 elif st == 401:
     print("   n8n says the API key is wrong (401)")
     todo.append("New n8n API key: localhost:5679 -> Settings -> n8n API -> Create (no expiry) -> paste into .env, SAVE")
+elif st == 404 and "Cannot GET" in str(wfs):
+    print("   n8n is still starting (its API is not ready yet)")
+    todo.append("Wait 30-60 seconds for n8n to finish starting, then run python3 scripts/doctor.py again. "
+                "If this stays: the n8n public API is disabled (N8N_PUBLIC_API_DISABLED) in your compose file.")
 elif st != 200:
-    print(f"   n8n API error HTTP {st}: {clean(wfs)}")
+    print(f"   n8n API error HTTP {st}: {clean(wfs)[:200]}")
 else:
     names = {}
     for w in wfs.get("data", []):

@@ -40,8 +40,8 @@ if [ -n "$PROJECT" ]; then
   printf 'services:\n  %s:\n    environment:\n      WEBHOOK_URL: "%s"\n' "$SERVICE" "$URL" > "$OVERRIDE"
   (cd "$WORKDIR" && docker compose -p "$PROJECT" "${FILES[@]}" up -d "$SERVICE")
   echo -n "Waiting for n8n"
-  for _ in $(seq 1 60); do
-    if curl -s -o /dev/null "http://localhost:${PORT}/healthz"; then echo " - up."; break; fi
+  for _ in $(seq 1 90); do
+    if [ "$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${PORT}/rest/settings")" = "200" ]; then echo " - ready."; break; fi
     echo -n "."; sleep 2
   done
   echo "Done. n8n now uses WEBHOOK_URL=${URL}."
@@ -86,8 +86,8 @@ if ! docker run "${ARGS[@]}" "$IMAGE" >/dev/null; then
 fi
 
 echo -n "Waiting for n8n"
-for _ in $(seq 1 60); do
-  if curl -s -o /dev/null "http://localhost:${PORT}/healthz"; then echo " - up."; break; fi
+for _ in $(seq 1 90); do
+  if [ "$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${PORT}/rest/settings")" = "200" ]; then echo " - ready."; break; fi
   echo -n "."; sleep 2
 done
 echo
