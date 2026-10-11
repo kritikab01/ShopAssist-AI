@@ -18,11 +18,36 @@ URL="http://localhost:${PORT}/"
 command -v docker >/dev/null || { echo "docker command not found"; exit 1; }
 docker inspect "$NAME" >/dev/null 2>&1 || { echo "No container named '$NAME'. Run: docker ps"; exit 1; }
 
-if [ -n "$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$NAME")" ]; then
-  echo "'$NAME' is managed by docker compose. Add this under the n8n service in your compose file:"
-  echo "    environment:"
-  echo "      - WEBHOOK_URL=${URL}"
-  echo "then run:  docker compose up -d"
+label() { docker inspect -f "{{index .Config.Labels \"$1\"}}" "$NAME"; }
+PROJECT=$(label com.docker.compose.project)
+if [ -n "$PROJECT" ]; then
+  # Managed by docker compose: add WEBHOOK_URL in a separate override file (your compose file is not edited)
+  # and let compose re-create only this service. Volumes (workflows, credentials) are kept.
+  WORKDIR=$(label com.docker.compose.project.working_dir)
+  SERVICE=$(label com.docker.compose.service)
+  CONFIGS=$(label com.docker.compose.project.config_files)
+  OVERRIDE="${WORKDIR}/shopassist-webhook.override.yml"
+  FILES=()
+  IFS=',' read -r -a CFG <<< "$CONFIGS"
+  for f in "${CFG[@]}"; do [ -n "$f" ] && FILES+=(-f "$f"); done
+  FILES+=(-f "$OVERRIDE")
+  echo "Compose project : $PROJECT   service: $SERVICE"
+  echo "Compose file(s) : $CONFIGS"
+  echo "Override file   : $OVERRIDE  (adds WEBHOOK_URL=${URL})"
+  echo "Command         : docker compose -p $PROJECT ${FILES[*]} up -d $SERVICE"
+  if [ "$DRY" = "--dry-run" ]; then echo "(dry run - nothing changed)"; exit 0; fi
+  [ -d "$WORKDIR" ] || { echo "Compose folder $WORKDIR not found. Add WEBHOOK_URL=${URL} to the n8n service's environment by hand, then: docker compose up -d"; exit 1; }
+  printf 'services:\n  %s:\n    environment:\n      WEBHOOK_URL: "%s"\n' "$SERVICE" "$URL" > "$OVERRIDE"
+  (cd "$WORKDIR" && docker compose -p "$PROJECT" "${FILES[@]}" up -d "$SERVICE")
+  echo -n "Waiting for n8n"
+  for _ in $(seq 1 60); do
+    if curl -s -o /dev/null "http://localhost:${PORT}/healthz"; then echo " - up."; break; fi
+    echo -n "."; sleep 2
+  done
+  echo "Done. n8n now uses WEBHOOK_URL=${URL}."
+  echo "Note: next time you start n8n with plain 'docker compose up -d', add:  -f $(basename "${CFG[0]}") -f $(basename "$OVERRIDE")"
+  echo "      (or copy 'WEBHOOK_URL: \"${URL}\"' into the environment of service '$SERVICE' in your compose file)."
+  echo "To undo:  rm \"$OVERRIDE\" && (cd \"$WORKDIR\" && docker compose -p $PROJECT ${CFG[*]/#/-f } up -d $SERVICE)"
   exit 0
 fi
 
