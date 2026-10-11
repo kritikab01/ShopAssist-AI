@@ -1,0 +1,258 @@
+{
+  "name": "06 Inventory Agent (Stock + Purchase Orders)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Overview – Workflow 06\n**Second domain-expert agent** (multi-agent). Called by the support agent (03) through the `inventory_expert` tool.\n\nTools: `stock_lookup` (Postgres `products`) and `create_purchase_order` (inserts into `purchase_orders`, status *pending_approval*). After the agent answers, a Slack message asks a manager to approve any new purchase order.\n\nCourse: 12–13 (multi-agent, sub-workflows), 19–20 (agent + Postgres), Slack API.",
+        "width": 560,
+        "height": 340,
+        "color": 4
+      },
+      "id": "434e0196-1418-5302-b5b1-7e312b656fa9",
+      "name": "Overview – Workflow 06",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -120,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "question"
+            }
+          ]
+        }
+      },
+      "id": "b5b1ea40-da2a-537d-b2d7-7301fa4d56e6",
+      "name": "When Called by Support Agent",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "agent": "toolsAgent",
+        "promptType": "define",
+        "text": "={{ $json.question }}",
+        "options": {
+          "systemMessage": "=You are the Inventory Agent of UrbanThread, an Indian online clothing store (prices in Rs). You are a domain expert in stock and procurement. Today is {{ $now.toFormat('dd LLL yyyy') }}.\n\n## Your tools\n- stock_lookup: product stock from the database. Input: a product name, SKU, size or category (e.g. \"kurta\", \"TSH-BAS-L\", \"hoodie XL\"), or the word \"low\" to list every product at or below its reorder level.\n- create_purchase_order: drafts a purchase order (status pending_approval) for ONE SKU. Inputs: sku, quantity, reason.\n\n## Rules\n1. Use only numbers returned by stock_lookup. Never invent stock levels, SKUs or suppliers.\n2. Customers asking \"is X available / in stock\": say \"In stock\" (stock > 0) or \"Out of stock\" and give the sizes that are available. Do not reveal exact stock numbers, costs or suppliers to customers.\n3. Staff/manager requests (\"low stock\", \"reorder\", \"restock\", \"purchase order\"): list the low-stock products with stock and reorder level.\n4. Only create a purchase order when the request asks to reorder / restock / create a PO. Order quantity = (2 x reorder_level) - stock, rounded up to a multiple of 5. One purchase order per SKU.\n5. After creating a purchase order, give the PO ID (like PO-0001), SKU, quantity and estimated cost, and say it is waiting for manager approval in Slack.\n6. Keep answers short (max 6 lines). End with \"(Source: inventory database)\".",
+          "maxIterations": 6
+        }
+      },
+      "id": "8b46a188-c248-5afc-a787-d57570d1730c",
+      "name": "Inventory AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "model": "qwen2.5:3b",
+        "options": {
+          "temperature": 0,
+          "numCtx": 8192,
+          "think": false
+        }
+      },
+      "id": "2bafbbe6-d37d-5a5b-8c0e-3b3e41d62824",
+      "name": "Ollama Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        120,
+        260
+      ],
+      "credentials": {
+        "ollamaApi": {
+          "id": "REPLACE_ME_ollama",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Look up products and stock. Input: a product name, SKU, size or category (e.g. kurta, TSH-BAS-L, hoodie XL), or the word low to list products at or below their reorder level.",
+        "operation": "executeQuery",
+        "query": "-- $1 = search text from the agent ('low' = everything at or below reorder level)\nSELECT sku, name, size, category, price_inr, stock, reorder_level, supplier, unit_cost_inr\nFROM products\nWHERE (LOWER(TRIM($1)) IN ('low', 'low stock') AND stock <= reorder_level)\n   OR sku ILIKE '%' || TRIM($1) || '%'\n   OR (LOWER(TRIM($1)) NOT IN ('low', 'low stock') AND EXISTS (\n         SELECT 1 FROM regexp_split_to_table(LOWER(TRIM($1)), '[^a-z0-9-]+') AS w\n         WHERE length(w) > 2 AND w NOT IN ('the', 'size', 'sizes', 'available', 'stock', 'have', 'what', 'you',\n               'any', 'for', 'and', 'are', 'there', 'much', 'many', 'how', 'can', 'get', 'buy', 'want', 'need')\n           AND (name || ' ' || category) ILIKE '%' || rtrim(w, 's?') || '%')\n       AND (COALESCE(size, '') = '' OR NOT EXISTS (SELECT 1 FROM regexp_split_to_table(UPPER(TRIM($1)), '[^A-Z0-9]+') AS s\n            WHERE s IN ('XS', 'S', 'M', 'L', 'XL', 'XXL', '28', '30', '32', '34', '36')) OR size IN (\n            SELECT s FROM regexp_split_to_table(UPPER(TRIM($1)), '[^A-Z0-9]+') AS s)))\nORDER BY stock - reorder_level\nLIMIT 12;",
+        "options": {
+          "queryReplacement": "={{ $fromAI('search', 'Product name, SKU, size or category, or the word low', 'string') }}"
+        }
+      },
+      "id": "de4be30f-5eb5-5d21-a593-0c9748eded9c",
+      "name": "stock_lookup",
+      "type": "n8n-nodes-base.postgresTool",
+      "typeVersion": 2.5,
+      "position": [
+        320,
+        260
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME_postgres",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Create ONE purchase order (status pending_approval) for a SKU that is low on stock. Inputs: sku (exact SKU from stock_lookup), quantity (whole number), reason (short text).",
+        "operation": "executeQuery",
+        "query": "INSERT INTO purchase_orders (sku, quantity, supplier, est_cost_inr, reason)\nSELECT p.sku, $2::int, p.supplier, p.unit_cost_inr * $2::int, $3\nFROM products p WHERE p.sku = UPPER(TRIM($1))\nRETURNING po_id, sku, quantity, supplier, est_cost_inr, status;",
+        "options": {
+          "queryReplacement": "={{ [ $fromAI('sku', 'Exact SKU, e.g. TSH-BAS-L', 'string'), $fromAI('quantity', 'Whole number of units to order', 'number'), $fromAI('reason', 'Short reason, e.g. stock 6 below reorder level 20', 'string') ] }}"
+        }
+      },
+      "id": "3c0e0e34-e075-5674-921d-16c79e5f42a9",
+      "name": "create_purchase_order",
+      "type": "n8n-nodes-base.postgresTool",
+      "typeVersion": 2.5,
+      "position": [
+        520,
+        260
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME_postgres",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#support-escalations",
+          "mode": "name"
+        },
+        "text": "=:package: *Inventory Agent*\nRequest: {{ $('When Called by Support Agent').item.json.question }}\nAnswer: {{ $json.output }}\nPlease review any purchase order marked *pending_approval*.",
+        "otherOptions": {}
+      },
+      "id": "756b456c-b4bc-5a46-a310-fbe206d96f8e",
+      "name": "Ask Manager to Approve (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        560,
+        0
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_ME_slack",
+          "name": "Slack account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "answer",
+              "type": "string",
+              "value": "={{ $('Inventory AI Agent').item.json.output }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d8fd2b97-fe17-5d42-9d0a-89d52c8503ff",
+      "name": "Return Answer to Support Agent",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        780,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "When Called by Support Agent": {
+      "main": [
+        [
+          {
+            "node": "Inventory AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inventory AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Ask Manager to Approve (Slack)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask Manager to Approve (Slack)": {
+      "main": [
+        [
+          {
+            "node": "Return Answer to Support Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Inventory AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "stock_lookup": {
+      "ai_tool": [
+        [
+          {
+            "node": "Inventory AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create_purchase_order": {
+      "ai_tool": [
+        [
+          {
+            "node": "Inventory AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "tags": []
+}

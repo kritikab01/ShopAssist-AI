@@ -118,6 +118,27 @@ def pinecone_insert(wf, name, pos):
                    ["pineconeApi"])
 
 
+def workflow_tool(wf, name, pos, description, placeholder_id, fields):
+    """An AI-agent tool that runs another n8n workflow (sub-workflow / sub-agent)."""
+    return wf.node(name, "@n8n/n8n-nodes-langchain.toolWorkflow", 2, pos, {
+        "name": name,  # required tool name in v2 (letters, numbers, underscores)
+        "description": description,
+        "workflowId": rl(placeholder_id, "id"),  # scripts/import_to_n8n.py fills in the real ID
+        "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {k: f"={{{{ $fromAI('{k}', '{v}', 'string') }}}}" for k, v in fields.items()},
+            "matchingColumns": [],
+            "schema": [
+                {"id": k, "displayName": k, "required": False, "defaultMatch": False,
+                 "display": True, "canBeUsedToMatch": True, "type": "string", "removed": False}
+                for k in fields
+            ],
+            "attemptToConvertTypes": False,
+            "convertFieldsToString": False,
+        },
+    })
+
+
 def metadata(*pairs):
     return {"metadataValues": [{"name": k, "value": v} for k, v in pairs]}
 
@@ -285,7 +306,8 @@ def wf03():
               "- `faq_knowledge` – Pinecone, filter `source=faq`\n"
               "- `website_knowledge` – Pinecone, filter `source=website`\n"
               "- `order_lookup` – Postgres query by order ID or phone\n"
-              "- `escalate_to_human` – calls workflow 04 (Slack + SMS + e-mail)\n\n"
+              "- `escalate_to_human` – calls workflow 04 (Slack + SMS + e-mail)\n"
+              "- `inventory_expert` – asks the **Inventory Agent** (workflow 06) – multi-agent\n\n"
               "Memory: Postgres Chat Memory (table `n8n_chat_histories`, last 10 messages).\n\n"
               "Course: 1–4 (agents, n8n basics), 7–9 & 18 (RAG + metadata filter), 12–13 (sub-workflow tool), "
               "14–15 (agentic RAG, two knowledge bases), 16–17 (public chat), 19–20 (agent + Postgres).",
@@ -369,28 +391,19 @@ def wf03():
         "reason": "Why you are escalating: angry customer, refund over Rs 5,000, no answer found, or human requested",
         "conversation_summary": "Short summary of the conversation and the exact problem of the customer",
     }
-    esc = wf.node("escalate_to_human", "@n8n/n8n-nodes-langchain.toolWorkflow", 2, (960, 300), {
-        "name": "escalate_to_human",  # required tool name in v2 (letters, numbers, underscores)
-        "description": (
-            "Create a support ticket and alert the human support team (Slack, SMS, e-mail). Use when the "
-            "customer is angry, wants a refund above Rs 5,000, asks for a human, or the answer is not in "
-            "the knowledge bases. Returns the ticket ID to give to the customer."
-        ),
-        "workflowId": rl("REPLACE_WITH_WORKFLOW_04_ID", "id"),
-        "workflowInputs": {
-            "mappingMode": "defineBelow",
-            "value": {k: f"={{{{ $fromAI('{k}', '{v}', 'string') }}}}" for k, v in fields.items()},
-            "matchingColumns": [],
-            "schema": [
-                {"id": k, "displayName": k, "required": False, "defaultMatch": False,
-                 "display": True, "canBeUsedToMatch": True, "type": "string", "removed": False}
-                for k in fields
-            ],
-            "attemptToConvertTypes": False,
-            "convertFieldsToString": False,
-        },
-    })
+    esc = workflow_tool(wf, "escalate_to_human", (960, 300), (
+        "Create a support ticket and alert the human support team (Slack, SMS, e-mail). Use when the "
+        "customer is angry, wants a refund above Rs 5,000, asks for a human, or the answer is not in "
+        "the knowledge bases. Returns the ticket ID to give to the customer."
+    ), "REPLACE_WITH_WORKFLOW_04_ID", fields)
     wf.link(esc, agent, "ai_tool")
+
+    # Multi-agent: a second domain expert (workflow 06) is available to this agent as a tool.
+    inv = workflow_tool(wf, "inventory_expert", (1160, 300), (
+        "Ask the Inventory Agent (domain expert for stock and procurement). Use for product availability, "
+        "sizes in stock, low stock, restocking and purchase orders. Send the full question; it returns the answer."
+    ), "REPLACE_WITH_WORKFLOW_06_ID", {"question": "The full question about stock, availability, restocking or purchase orders"})
+    wf.link(inv, agent, "ai_tool")
 
     wf.link(chat, agent)
     wf.link(llm, agent, "ai_languageModel")
@@ -401,7 +414,7 @@ def wf03():
               "3. **Activate** the workflow, open the Chat Trigger and copy the **public chat URL**.\n"
               "4. The system prompt lives in `prompts/agent_system_prompt.md` (rules: answer only from "
               "tools, cite source, ask for order ID, escalate if angry / refund > Rs 5,000 / no answer).",
-              (1180, -40), w=420, h=300)
+              (1380, -40), w=420, h=300)
     wf.save("03_support_agent_chat.json")
 
 
@@ -641,7 +654,99 @@ def wf05():
     wf.save("05_order_update_webhook.json")
 
 
+# ---------------------------------------------------------------- 06 inventory agent
+def wf06():
+    wf = WF("06 Inventory Agent (Stock + Purchase Orders)")
+    prompt = (ROOT / "prompts" / "inventory_agent_prompt.md").read_text(encoding="utf-8").strip()
+    wf.sticky("Overview – Workflow 06",
+              "**Second domain-expert agent** (multi-agent). Called by the support agent (03) through the "
+              "`inventory_expert` tool.\n\n"
+              "Tools: `stock_lookup` (Postgres `products`) and `create_purchase_order` (inserts into "
+              "`purchase_orders`, status *pending_approval*). After the agent answers, a Slack message asks "
+              "a manager to approve any new purchase order.\n\n"
+              "Course: 12–13 (multi-agent, sub-workflows), 19–20 (agent + Postgres), Slack API.",
+              (-120, -420), w=560, h=340, color=4)
+    trig = wf.node("When Called by Support Agent", "n8n-nodes-base.executeWorkflowTrigger", 1.1, (0, 0), {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {"values": [{"name": "question"}]},
+    })
+    agent = wf.node("Inventory AI Agent", "@n8n/n8n-nodes-langchain.agent", 1.7, (260, 0), {
+        "agent": "toolsAgent",
+        "promptType": "define",
+        "text": "={{ $json.question }}",
+        "options": {"systemMessage": "=" + prompt, "maxIterations": 6},
+    })
+    llm = ollama_chat(wf, "Ollama Chat Model", (120, 260), temperature=0)
+    stock = wf.node("stock_lookup", "n8n-nodes-base.postgresTool", 2.5, (320, 260), {
+        "descriptionType": "manual",
+        "toolDescription": (
+            "Look up products and stock. Input: a product name, SKU, size or category (e.g. kurta, TSH-BAS-L, "
+            "hoodie XL), or the word low to list products at or below their reorder level."
+        ),
+        "operation": "executeQuery",
+        "query": (
+            "-- $1 = search text from the agent ('low' = everything at or below reorder level)\n"
+            "SELECT sku, name, size, category, price_inr, stock, reorder_level, supplier, unit_cost_inr\n"
+            "FROM products\n"
+            "WHERE (LOWER(TRIM($1)) IN ('low', 'low stock') AND stock <= reorder_level)\n"
+            "   OR sku ILIKE '%' || TRIM($1) || '%'\n"
+            "   OR (LOWER(TRIM($1)) NOT IN ('low', 'low stock') AND EXISTS (\n"
+            "         SELECT 1 FROM regexp_split_to_table(LOWER(TRIM($1)), '[^a-z0-9-]+') AS w\n"
+            "         WHERE length(w) > 2 AND w NOT IN ('the', 'size', 'sizes', 'available', 'stock', 'have', 'what', 'you',\n"
+            "               'any', 'for', 'and', 'are', 'there', 'much', 'many', 'how', 'can', 'get', 'buy', 'want', 'need')\n"
+            "           AND (name || ' ' || category) ILIKE '%' || rtrim(w, 's?') || '%')\n"
+            "       AND (COALESCE(size, '') = '' OR NOT EXISTS (SELECT 1 FROM regexp_split_to_table(UPPER(TRIM($1)), '[^A-Z0-9]+') AS s\n"
+            "            WHERE s IN ('XS', 'S', 'M', 'L', 'XL', 'XXL', '28', '30', '32', '34', '36')) OR size IN (\n"
+            "            SELECT s FROM regexp_split_to_table(UPPER(TRIM($1)), '[^A-Z0-9]+') AS s)))\n"
+            "ORDER BY stock - reorder_level\n"
+            "LIMIT 12;"
+        ),
+        "options": {"queryReplacement": (
+            "={{ $fromAI('search', 'Product name, SKU, size or category, or the word low', 'string') }}"
+        )},
+    }, ["postgres"])
+    po = wf.node("create_purchase_order", "n8n-nodes-base.postgresTool", 2.5, (520, 260), {
+        "descriptionType": "manual",
+        "toolDescription": (
+            "Create ONE purchase order (status pending_approval) for a SKU that is low on stock. "
+            "Inputs: sku (exact SKU from stock_lookup), quantity (whole number), reason (short text)."
+        ),
+        "operation": "executeQuery",
+        "query": (
+            "INSERT INTO purchase_orders (sku, quantity, supplier, est_cost_inr, reason)\n"
+            "SELECT p.sku, $2::int, p.supplier, p.unit_cost_inr * $2::int, $3\n"
+            "FROM products p WHERE p.sku = UPPER(TRIM($1))\n"
+            "RETURNING po_id, sku, quantity, supplier, est_cost_inr, status;"
+        ),
+        "options": {"queryReplacement": (
+            "={{ [ $fromAI('sku', 'Exact SKU, e.g. TSH-BAS-L', 'string'), "
+            "$fromAI('quantity', 'Whole number of units to order', 'number'), "
+            "$fromAI('reason', 'Short reason, e.g. stock 6 below reorder level 20', 'string') ] }}"
+        )},
+    }, ["postgres"])
+    slack = wf.node("Ask Manager to Approve (Slack)", "n8n-nodes-base.slack", 2.3, (560, 0), {
+        "select": "channel",
+        "channelId": rl("#support-escalations", "name"),
+        "text": "=:package: *Inventory Agent*\nRequest: {{ $('When Called by Support Agent').item.json.question }}\n"
+                "Answer: {{ $json.output }}\nPlease review any purchase order marked *pending_approval*.",
+        "otherOptions": {},
+    }, ["slackApi"], onError="continueRegularOutput")
+    ret = wf.node("Return Answer to Support Agent", "n8n-nodes-base.set", 3.4, (780, 0), {
+        "assignments": {"assignments": [
+            {"id": "a1", "name": "answer", "type": "string", "value": "={{ $('Inventory AI Agent').item.json.output }}"},
+        ]},
+        "options": {},
+    })
+    wf.link(trig, agent)
+    wf.link(agent, slack)
+    wf.link(slack, ret)
+    wf.link(llm, agent, "ai_languageModel")
+    wf.link(stock, agent, "ai_tool")
+    wf.link(po, agent, "ai_tool")
+    wf.save("06_inventory_agent.json")
+
+
 if __name__ == "__main__":
     OUT_DIR.mkdir(exist_ok=True)
-    for build in (wf01, wf02, wf03, wf04, wf05):
+    for build in (wf01, wf02, wf03, wf04, wf05, wf06):
         build()
