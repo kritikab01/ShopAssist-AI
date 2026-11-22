@@ -73,12 +73,27 @@ def git(*args):
 # ------------------------------------------------------------------ 1. code version
 print("\n1) Code version")
 git("fetch", "-q", "origin")
-REF = "origin/claude/quirky-tesla-gzzg4y"  # latest code (main + newest fixes)
+REF = "origin/main"  # the released code; feature branches may be older than main
 branch = git("rev-parse", "--abbrev-ref", "HEAD")
 local, remote = git("rev-parse", "--short", "HEAD"), git("rev-parse", "--short", REF)
-print(f"   branch {branch}, this folder at {local}, latest on GitHub {remote or '?'}")
+print(f"   branch {branch}, this folder at {local}, latest on GitHub main {remote or '?'}")
+
+
+def is_ancestor(a, b):
+    try:
+        return subprocess.run(["git", "merge-base", "--is-ancestor", a, b], cwd=ROOT,
+                              capture_output=True, timeout=60).returncode == 0
+    except Exception:
+        return False
+
+
 if remote and local != remote:
-    todo.append("Get the latest code:  git fetch origin && git reset --hard origin/claude/quirky-tesla-gzzg4y")
+    if is_ancestor("HEAD", REF):  # strictly behind main: a fast-forward is safe and loses nothing
+        todo.append("Get the latest code:  git checkout main && git pull --ff-only origin main")
+    elif is_ancestor(REF, "HEAD"):
+        print("   this folder is ahead of GitHub main (local or unmerged work) - nothing to update")
+    else:
+        print("   this folder and GitHub main have both changed - merge by hand if you need main's updates")
 gen = (ROOT / "workflows" / "03_support_agent_chat.json").read_text(encoding="utf-8")
 print("   workflow files in this folder use:", "Ollama" if "lmChatOllama" in gen else "GEMINI (old)")
 
