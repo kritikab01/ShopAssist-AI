@@ -213,7 +213,6 @@ human" share is the main KPI: about 4 in 5 conversations needed no staff time.
 ## 7. Limitations
 
 - Fictional data and small knowledge base (1 PDF, 4 pages); real stores need regular re-ingestion.
-- Re-running ingestion creates duplicate vectors (no upsert by document ID).
 - Public chat has no login: anyone who knows an order ID can see its status (production needs OTP verification).
 - Sentiment / anger detection depends on the LLM and may miss sarcasm or Hinglish.
 - Twilio trial sends only to verified numbers and adds a trial prefix to messages.

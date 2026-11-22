@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## Overview – Workflow 01\n**Goal:** load the store FAQ/policy PDF into the Pinecone index `shopassist` so the agent can search it (RAG).\n\nFlow: Manual trigger → download PDF → split into 1000-char chunks (200 overlap) → embed with Ollama `nomic-embed-text` (768 dims) → insert with metadata `source = faq`.\n\n**Run once** (running again adds duplicates – clear the index first).\n\nCourse: Sessions 7–9 (RAG with Pinecone), 18 (metadata).",
+        "content": "## Overview – Workflow 01\n**Goal:** load the store FAQ/policy PDF into the Pinecone index `shopassist` so the agent can search it (RAG).\n\nFlow: Manual trigger → download PDF → split into 1000-char chunks (200 overlap) → embed with Ollama `nomic-embed-text` (768 dims) → replace namespace `faq` (metadata `source = faq`).\n\n**Safe to re-run:** namespace `faq` is emptied and refilled (no duplicate vectors).\n\nCourse: Sessions 7–9 (RAG with Pinecone), 18 (metadata).",
         "width": 520,
         "height": 300,
         "color": 4
@@ -69,10 +69,14 @@
           "value": "shopassist",
           "mode": "list"
         },
-        "options": {}
+        "embeddingBatchSize": 5000,
+        "options": {
+          "clearNamespace": true,
+          "pineconeNamespace": "faq"
+        }
       },
-      "id": "de6f5eef-a439-575a-b940-649d92a8cd0d",
-      "name": "Insert into Pinecone (source=faq)",
+      "id": "1119d478-20ed-5ee4-b088-b5c5f9fade48",
+      "name": "Replace FAQ in Pinecone (namespace faq)",
       "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
       "typeVersion": 1.3,
       "position": [
@@ -192,7 +196,7 @@
       "main": [
         [
           {
-            "node": "Insert into Pinecone (source=faq)",
+            "node": "Replace FAQ in Pinecone (namespace faq)",
             "type": "main",
             "index": 0
           }
@@ -203,7 +207,7 @@
       "ai_embedding": [
         [
           {
-            "node": "Insert into Pinecone (source=faq)",
+            "node": "Replace FAQ in Pinecone (namespace faq)",
             "type": "ai_embedding",
             "index": 0
           }
@@ -214,7 +218,7 @@
       "ai_document": [
         [
           {
-            "node": "Insert into Pinecone (source=faq)",
+            "node": "Replace FAQ in Pinecone (namespace faq)",
             "type": "ai_document",
             "index": 0
           }

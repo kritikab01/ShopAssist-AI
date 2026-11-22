@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## Overview – Workflow 02\n**Goal:** scrape store web pages, summarize each with the LLM, and store the summaries in Pinecone with metadata `source = website` and `url`.\n\nFlow: read `data/urls.txt` → one item per URL → HTTP GET page → extract text from HTML → LLM summary → embed → Pinecone insert.\n\nCourse: Capstone (web scraping + summarization), Sessions 5–6 (LLM chains), 7–9 & 18 (Pinecone + metadata), 14–15 (second knowledge base).",
+        "content": "## Overview – Workflow 02\n**Goal:** scrape store web pages, summarize each with the LLM, and store the summaries in Pinecone namespace `website` (metadata `source = website`, `url`), replacing the old ones.\n\nFlow: read `data/urls.txt` → one item per URL → HTTP GET page → extract text from HTML → LLM summary → embed → Pinecone insert.\n\nCourse: Capstone (web scraping + summarization), Sessions 5–6 (LLM chains), 7–9 & 18 (Pinecone + metadata), 14–15 (second knowledge base).",
         "width": 560,
         "height": 320,
         "color": 4
@@ -195,10 +195,14 @@
           "value": "shopassist",
           "mode": "list"
         },
-        "options": {}
+        "embeddingBatchSize": 5000,
+        "options": {
+          "clearNamespace": true,
+          "pineconeNamespace": "website"
+        }
       },
-      "id": "172e036a-64dc-580e-8f5d-d4e0a798f4a3",
-      "name": "Insert into Pinecone (source=website)",
+      "id": "5ca37b93-498c-542d-9f4f-183e319d93dc",
+      "name": "Replace Website KB in Pinecone (namespace website)",
       "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
       "typeVersion": 1.3,
       "position": [
@@ -367,7 +371,7 @@
       "main": [
         [
           {
-            "node": "Insert into Pinecone (source=website)",
+            "node": "Replace Website KB in Pinecone (namespace website)",
             "type": "main",
             "index": 0
           }
@@ -389,7 +393,7 @@
       "ai_embedding": [
         [
           {
-            "node": "Insert into Pinecone (source=website)",
+            "node": "Replace Website KB in Pinecone (namespace website)",
             "type": "ai_embedding",
             "index": 0
           }
@@ -400,7 +404,7 @@
       "ai_document": [
         [
           {
-            "node": "Insert into Pinecone (source=website)",
+            "node": "Replace Website KB in Pinecone (namespace website)",
             "type": "ai_document",
             "index": 0
           }

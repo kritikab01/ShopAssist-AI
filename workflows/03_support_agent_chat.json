@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## Overview – Workflow 03\n**Goal:** the customer-facing AI agent on a **public chat URL**.\n\nThe Tools Agent decides which tool to call:\n- `faq_knowledge` – Pinecone, filter `source=faq`\n- `website_knowledge` – Pinecone, filter `source=website`\n- `order_lookup` – Postgres query by order ID or phone\n- `escalate_to_human` – calls workflow 04 (Slack + SMS + e-mail)\n- `inventory_expert` – asks the **Inventory Agent** (workflow 06) – multi-agent\n\n**Guardrails:** *Detect Intent* (rules) before the agent; after it, if a human is needed and the reply has no ticket ID, *Create Ticket (workflow 04)* runs anyway (guaranteed escalation).\n\nMemory: Postgres Chat Memory (table `n8n_chat_histories`, last 10 messages).\n\nCourse: 1–4 (agents, n8n basics), 7–9 & 18 (RAG + metadata filter), 12–13 (sub-workflow tool), 14–15 (agentic RAG, two knowledge bases), 16–17 (public chat), 19–20 (agent + Postgres).",
+        "content": "## Overview – Workflow 03\n**Goal:** the customer-facing AI agent on a **public chat URL**.\n\nThe Tools Agent decides which tool to call:\n- `faq_knowledge` – Pinecone namespace `faq`\n- `website_knowledge` – Pinecone namespace `website`\n- `order_lookup` – Postgres query by order ID or phone\n- `escalate_to_human` – calls workflow 04 (Slack + SMS + e-mail)\n- `inventory_expert` – asks the **Inventory Agent** (workflow 06) – multi-agent\n\n**Guardrails:** *Detect Intent* (rules) before the agent; after it, if a human is needed and the reply has no ticket ID, *Create Ticket (workflow 04)* runs anyway (guaranteed escalation).\n\nMemory: Postgres Chat Memory (table `n8n_chat_histories`, last 10 messages).\n\nCourse: 1–4 (agents, n8n basics), 7–9 & 18 (RAG + metadata filter), 12–13 (sub-workflow tool), 14–15 (agentic RAG, two knowledge bases), 16–17 (public chat), 19–20 (agent + Postgres).",
         "width": 600,
         "height": 460,
         "color": 4
@@ -114,6 +114,7 @@
         "topK": 4,
         "includeDocumentMetadata": true,
         "options": {
+          "pineconeNamespace": "faq",
           "metadata": {
             "metadataValues": [
               {
@@ -171,6 +172,7 @@
         "topK": 4,
         "includeDocumentMetadata": true,
         "options": {
+          "pineconeNamespace": "website",
           "metadata": {
             "metadataValues": [
               {

@@ -8,6 +8,12 @@ Run on your own computer, in the repo folder (reads PINECONE_API_KEY from .env):
 - index exists, size 768   -> nothing to do
 - index exists, other size -> asks "type DELETE" before deleting and recreating it
   (an index's dimension can never be changed; the old vectors are useless anyway)
+
+    python3 scripts/setup_pinecone.py --clean-old
+
+removes the vectors that the first version stored in the default namespace. Since v2 the FAQ lives in
+namespace "faq" and the web pages in "website"; workflows 01/02 empty and refill their own namespace on every
+run, so re-running them never creates duplicates.
 Never prints your API key.
 """
 import json
@@ -61,6 +67,17 @@ def message(r):
 
 
 st, idx = call("GET", f"/indexes/{name}")
+if "--clean-old" in sys.argv:
+    if st != 200:
+        sys.exit(f"Index '{name}' not found (HTTP {st}).")
+    req = urllib.request.Request(f"https://{idx['host']}/vectors/delete", method="POST", headers=H,
+                                 data=json.dumps({"deleteAll": True, "namespace": ""}).encode())
+    try:
+        urllib.request.urlopen(req, timeout=30).read()
+        print("Old vectors in the default namespace removed. The 'faq' and 'website' namespaces are untouched.")
+    except urllib.error.HTTPError as e:
+        print("Nothing to remove." if e.code == 404 else f"Pinecone error HTTP {e.code}: {e.read().decode()[:200]}")
+    sys.exit(0)
 if st == 401:
     sys.exit("Pinecone says the API key is invalid. Copy it again from app.pinecone.io -> API Keys into .env.")
 if st == 200:
@@ -92,7 +109,7 @@ print(f"Creating '{name}' ({DIMENSION} dims, {METRIC}) ...")
 for _ in range(60):
     st, idx = call("GET", f"/indexes/{name}")
     if st == 200 and (idx.get("status") or {}).get("ready"):
-        print(f"OK: index '{name}' is ready. Now run workflow 01, then 02, in n8n (once each).")
+        print(f"OK: index '{name}' is ready. Now run workflow 01, then 02, in n8n (safe to re-run).")
         sys.exit(0)
     time.sleep(2)
 print("The index was created but is not ready yet - wait a minute, then run workflow 01.")

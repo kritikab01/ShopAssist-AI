@@ -32,9 +32,11 @@ python3 scripts/doctor.py
 ✅ Every workflow shows `AI=OLLAMA` (05 shows `AI=-`), no missing credentials, `n8n -> Ollama: Connection successful`.
 If it says **chat messages go to the wrong port**, see step 9.
 
-## 4. Fill the knowledge base (only once – re-running duplicates vectors)
+## 4. Fill the knowledge base (safe to re-run – each run replaces its own Pinecone namespace)
 In n8n: open **01 Ingest FAQ PDF** → **Execute workflow** → all nodes green.
 Then **02 Scrape Web Pages** → **Execute workflow** (1–2 minutes).
+`python3 scripts/doctor.py` then shows `namespaces: faq=6, website=4`. Upgrading from v1? Run
+`python3 scripts/setup_pinecone.py --clean-old` once to delete the old vectors in the default namespace.
 
 ## 5. Publish (n8n 2.x) – in this order
 **04** → **06** → **03** → **05** (button *Publish*, top right of each workflow).

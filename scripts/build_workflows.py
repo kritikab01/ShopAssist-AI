@@ -154,9 +154,14 @@ def text_splitter(wf, name, pos):
                    1, pos, {"chunkSize": 1000, "chunkOverlap": 200, "options": {}})
 
 
-def pinecone_insert(wf, name, pos):
+def pinecone_insert(wf, name, pos, namespace):
+    """Insert into ONE namespace per knowledge base, emptied first: re-running ingestion replaces the
+    knowledge base instead of adding duplicate vectors (safe to run every day, e.g. after a policy change).
+    n8n (node 1.3) collects all documents first and inserts them in batches of embeddingBatchSize; the namespace
+    is cleared before each batch, so the batch size is set far above our document count -> cleared exactly once."""
     return wf.node(name, "@n8n/n8n-nodes-langchain.vectorStorePinecone", 1.3, pos,
-                   {"mode": "insert", "pineconeIndex": rl(PINECONE_INDEX), "options": {}},
+                   {"mode": "insert", "pineconeIndex": rl(PINECONE_INDEX), "embeddingBatchSize": 5000,
+                    "options": {"clearNamespace": True, "pineconeNamespace": namespace}},
                    ["pineconeApi"])
 
 
@@ -194,8 +199,8 @@ def wf01():
               "**Goal:** load the store FAQ/policy PDF into the Pinecone index `shopassist` "
               "so the agent can search it (RAG).\n\n"
               "Flow: Manual trigger → download PDF → split into 1000-char chunks (200 overlap) → "
-              "embed with Ollama `nomic-embed-text` (768 dims) → insert with metadata `source = faq`.\n\n"
-              "**Run once** (running again adds duplicates – clear the index first).\n\n"
+              "embed with Ollama `nomic-embed-text` (768 dims) → replace namespace `faq` (metadata `source = faq`).\n\n"
+              "**Safe to re-run:** namespace `faq` is emptied and refilled (no duplicate vectors).\n\n"
               "Course: Sessions 7–9 (RAG with Pinecone), 18 (metadata).",
               (-80, -360), w=520, h=300, color=4)
     t = wf.node("Start Ingestion", "n8n-nodes-base.manualTrigger", 1, (0, 0))
@@ -216,7 +221,7 @@ def wf01():
             "return $input.all();\n"
         ),
     })
-    pc = pinecone_insert(wf, "Insert into Pinecone (source=faq)", (680, 0))
+    pc = pinecone_insert(wf, "Replace FAQ in Pinecone (namespace faq)", (680, 0), "faq")
     emb = ollama_embeddings(wf, "Ollama Embeddings", (600, 240))
     loader = wf.node("Default Data Loader (PDF)", "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
                      1.1, (800, 240), {
@@ -251,7 +256,7 @@ def wf02():
     wf = WF("02 Scrape Web Pages, Summarize and Store", timeout=1200)
     wf.sticky("Overview – Workflow 02",
               "**Goal:** scrape store web pages, summarize each with the LLM, and store the summaries "
-              "in Pinecone with metadata `source = website` and `url`.\n\n"
+              "in Pinecone namespace `website` (metadata `source = website`, `url`), replacing the old ones.\n\n"
               "Flow: read `data/urls.txt` → one item per URL → HTTP GET page → extract text from HTML → "
               "LLM summary → embed → Pinecone insert.\n\n"
               "Course: Capstone (web scraping + summarization), Sessions 5–6 (LLM chains), "
@@ -308,7 +313,7 @@ def wf02():
         ]},
         "options": {},
     })
-    pc = pinecone_insert(wf, "Insert into Pinecone (source=website)", (1480, 0))
+    pc = pinecone_insert(wf, "Replace Website KB in Pinecone (namespace website)", (1480, 0), "website")
     emb = ollama_embeddings(wf, "Ollama Embeddings", (1400, 240))
     loader = wf.node("Default Data Loader (summary)", "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
                      1.1, (1600, 240), {
@@ -347,8 +352,8 @@ def wf03():
     wf.sticky("Overview – Workflow 03",
               "**Goal:** the customer-facing AI agent on a **public chat URL**.\n\n"
               "The Tools Agent decides which tool to call:\n"
-              "- `faq_knowledge` – Pinecone, filter `source=faq`\n"
-              "- `website_knowledge` – Pinecone, filter `source=website`\n"
+              "- `faq_knowledge` – Pinecone namespace `faq`\n"
+              "- `website_knowledge` – Pinecone namespace `website`\n"
               "- `order_lookup` – Postgres query by order ID or phone\n"
               "- `escalate_to_human` – calls workflow 04 (Slack + SMS + e-mail)\n"
               "- `inventory_expert` – asks the **Inventory Agent** (workflow 06) – multi-agent\n\n"
@@ -390,7 +395,7 @@ def wf03():
             "pineconeIndex": rl(PINECONE_INDEX),
             "topK": 4,
             "includeDocumentMetadata": True,
-            "options": {"metadata": metadata(("source", source))},
+            "options": {"pineconeNamespace": source, "metadata": metadata(("source", source))},
         }, ["pineconeApi"])
         emb = ollama_embeddings(wf, f"Ollama Embeddings ({source})", (x, 520))
         wf.link(emb, node, "ai_embedding")

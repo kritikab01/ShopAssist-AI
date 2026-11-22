@@ -173,11 +173,18 @@ else:
         dim = r.get("dimension")
         st2, s2 = http("POST", f"https://{r['host']}/describe_index_stats", PH, {})
         n = s2.get("totalVectorCount", s2.get("total_vector_count", 0)) if st2 == 200 else "?"
-        print(f"   index dimension {dim} (need 768), vectors stored: {n}  (~6 after workflow 01, more after 02)")
+        ns = {k: (v.get("vectorCount", v.get("vector_count", 0))) for k, v in (s2.get("namespaces") or {}).items()} \
+            if st2 == 200 else {}
+        print(f"   index dimension {dim} (need 768), vectors stored: {n}  "
+              f"(namespaces: faq={ns.get('faq', 0)}, website={ns.get('website', 0)})")
         if dim != 768:
             todo.append("Pinecone index has the wrong size:  python3 scripts/setup_pinecone.py  (makes it 768)")
-        elif n == 0:
-            todo.append("Knowledge base is EMPTY: in n8n run workflow 01, then 02 (Execute workflow) - FAQ and offers come from there")
+        elif not ns.get("faq") or not ns.get("website"):
+            todo.append("Knowledge base is EMPTY: in n8n run workflow 01, then 02 (Execute workflow) - FAQ and offers come from there "
+                        "(re-running them is safe now: each one replaces its own namespace)")
+        if ns.get(""):
+            print(f"   note: {ns['']} old vectors from the first version are in the default namespace (no longer used). "
+                  "Remove them: python3 scripts/setup_pinecone.py --clean-old")
 
 # ------------------------------------------------------------------ 4. n8n
 print("\n4) n8n")
