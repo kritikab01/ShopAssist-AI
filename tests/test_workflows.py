@@ -16,14 +16,21 @@ def test_all_seven_workflows_exist(workflows):
 
 
 def test_generated_files_are_up_to_date(tmp_path):
-    """workflows/*.json must be exactly what scripts/build_workflows.py produces (never hand-edited)."""
-    code = (f"import sys; sys.argv=['x']; sys.path.insert(0, {str(ROOT / 'scripts')!r}); import build_workflows as b; "
-            f"from pathlib import Path; b.OUT_DIR = Path({str(tmp_path)!r}); "
-            "[f() for f in (b.wf01, b.wf02, b.wf03, b.wf04, b.wf05, b.wf06, b.wf07)]")
-    subprocess.run([sys.executable, "-c", code], check=True, capture_output=True)
-    for name in EXPECTED:
-        assert (tmp_path / name).read_text(encoding="utf-8") == (WF_DIR / name).read_text(encoding="utf-8"), \
-            f"{name} is out of date: run python3 scripts/build_workflows.py"
+    """workflows/*.json and workflows/cloud/*.json must be exactly what scripts/build_workflows.py produces."""
+    for profile, folder in (("local", WF_DIR), ("cloud", WF_DIR / "cloud")):
+        out = tmp_path / profile
+        code = (f"import sys; sys.argv=['x']; sys.path.insert(0, {str(ROOT / 'scripts')!r}); import build_workflows as b; "
+                f"b.build_all({str(out)!r}, {profile!r})")
+        subprocess.run([sys.executable, "-c", code], check=True, capture_output=True)
+        for name in EXPECTED:
+            assert (out / name).read_text(encoding="utf-8") == (folder / name).read_text(encoding="utf-8"), \
+                f"{folder.name}/{name} is out of date: run python3 scripts/build_workflows.py"
+
+
+def test_cloud_profile_uses_groq_and_cohere():
+    text = "".join(p.read_text(encoding="utf-8") for p in sorted((WF_DIR / "cloud").glob("*.json")))
+    assert "lmChatOllama" not in text and "embeddingsOllama" not in text
+    assert "lmChatGroq" in text and "embeddingsCohere" in text and '"shopassist-cloud"' in text
 
 
 def test_connections_point_to_existing_nodes(workflows):

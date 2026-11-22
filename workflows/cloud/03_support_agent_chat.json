@@ -1,0 +1,793 @@
+{
+  "name": "03 ShopAssist Support Agent (Chat)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Overview – Workflow 03\n**Goal:** the customer-facing AI agent on a **public chat URL**.\n\nThe Tools Agent decides which tool to call:\n- `faq_knowledge` – Pinecone namespace `faq`\n- `website_knowledge` – Pinecone namespace `website`\n- `order_lookup` – Postgres query by order ID or phone\n- `escalate_to_human` – calls workflow 04 (Slack + SMS + e-mail)\n- `inventory_expert` – asks the **Inventory Agent** (workflow 06) – multi-agent\n\n**Guardrails:** *Detect Intent* (rules) before the agent; after it, if a human is needed and the reply has no ticket ID, *Create Ticket (workflow 04)* runs anyway (guaranteed escalation).\n\nMemory: Postgres Chat Memory (table `n8n_chat_histories`, last 10 messages).\n\nCourse: 1–4 (agents, n8n basics), 7–9 & 18 (RAG + metadata filter), 12–13 (sub-workflow tool), 14–15 (agentic RAG, two knowledge bases), 16–17 (public chat), 19–20 (agent + Postgres).",
+        "width": 600,
+        "height": 460,
+        "color": 4
+      },
+      "id": "af760e80-e92f-561c-8345-9d3be463cedf",
+      "name": "Overview – Workflow 03",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -120,
+        -520
+      ]
+    },
+    {
+      "parameters": {
+        "public": true,
+        "mode": "hostedChat",
+        "initialMessages": "Hi! I'm ShopAssist from UrbanThread 👕\nAsk me about orders, returns, sizes, delivery or offers.",
+        "options": {
+          "title": "UrbanThread ShopAssist",
+          "subtitle": "AI support – a human can take over anytime",
+          "inputPlaceholder": "e.g. Where is my order UT1003?"
+        }
+      },
+      "id": "c1a9ccec-4b53-540d-a7e0-77034e804f74",
+      "name": "Public Chat (UrbanThread)",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "7d2085bc-5d34-52cb-be82-66640b50391e"
+    },
+    {
+      "parameters": {
+        "agent": "toolsAgent",
+        "promptType": "auto",
+        "options": {
+          "systemMessage": "=You are ShopAssist, the friendly customer-support assistant of UrbanThread, an online clothing store in India. Prices are in Indian Rupees (Rs). Today's date is {{ $now.toFormat('dd LLL yyyy') }}.\n\n## Your tools\n- faq_knowledge: official store FAQ and policies (returns, refunds, sizes, delivery, COD, payments, cancellations).\n- website_knowledge: summaries of UrbanThread web pages (shipping partners, festive delays, size and fit tips, offers and coupons, gift cards, garment care, sustainability).\n- order_lookup: order details from the database. Inputs: order_id (like UT1003) and phone_last4 (last 4 digits of the phone number on the order). It only returns details when the digits match; always follow its 'instruction' field.\n- escalate_to_human: creates a support ticket and alerts the human team by Slack, SMS and e-mail. Returns a ticket ID.\n- inventory_expert: a separate Inventory Agent (domain expert for stock and purchase orders). Send it the full question for anything about product availability, sizes in stock, low stock, restocking or purchase orders, and pass its answer on.\n\n## Short messages (one word or code)\nCustomers often type just one word or a code. Treat them like this:\n- an order ID like UT1002 (any case) -> call order_lookup with it (phone_last4 empty if not given) and follow the instruction (usually: ask for the last 4 digits of the phone number).\n- 4 digits alone (like 0003) -> the last 4 digits of the phone for the order ID from earlier in the chat: call order_lookup with both.\n- \"return\", \"returns\", \"refund\", \"exchange\", \"cancel\", \"cod\", \"delivery\", \"shipping\", \"size\", \"sizes\", \"payment\" -> search faq_knowledge for that topic and give a short answer.\n- \"offer\", \"offers\", \"coupon\", \"diwali\", \"sale\", \"gift card\", \"care\", \"wash\" -> search website_knowledge.\n- \"stock\", \"available\", \"restock\", \"low stock\", \"inventory\" or a product name like \"kurta\" or \"hoodie\" -> call inventory_expert.\n- \"human\", \"agent\", \"manager\", \"complaint\" -> escalate_to_human.\n- \"hi\", \"hello\", \"help\", \"menu\" -> greet and list what you can do: track order, returns & refunds, sizes, delivery, offers, stock.\n\n## Rules\n1. Answer ONLY using information returned by your tools. Never invent policies, prices, dates or order details. Do not use general knowledge about other stores.\n2. For policy questions, search faq_knowledge first; for offers, shipping partners, festive delays, fit tips or garment care, search website_knowledge. Use both if needed.\n3. At the end of every answer, cite where the information came from, e.g. \"(Source: Store FAQ)\", \"(Source: website – <url>)\" or \"(Source: order database)\".\n4. If the customer asks about a specific order (status, delivery date, return, refund) and has not given an order ID, ask for the order ID and the last 4 digits of the phone number on the order. Never guess an order ID.\n5. Privacy: share order details ONLY when order_lookup returns verification = verified. Never reveal the phone number, e-mail or address on an order.\n6. Call escalate_to_human when ANY of these is true:\n   a. the customer is angry, abusive, or threatens to complain / leave a bad review;\n   b. the customer asks for a refund of MORE than Rs 5,000 (check the order amount with order_lookup) – you are not allowed to approve it;\n   c. you cannot find the answer in your tools after searching;\n   d. the customer explicitly asks for a human.\n   Before escalating, try to collect the customer's name, phone number and order ID (if relevant), but do not block escalation if they refuse.\n   After escalating, apologise, give the ticket ID and say a human will contact them within 4 business hours.\n7. If the question is not about UrbanThread (e.g. weather, coding, other shops), politely say you can only help with UrbanThread orders and policies. Do not escalate out-of-scope questions.\n8. Keep answers short (max 5 sentences or a short list), warm and simple. Use Rs for amounts.\n9. Language: reply in the customer's language. English -> English; Hinglish (Hindi in English letters, e.g. \"mera order kab aayega\") -> Hinglish; Hindi script -> simple Hindi. Always call the tools with English search words.\n10. Sarcasm (\"wow, great service, still not delivered\") means the customer is upset: treat it like rule 6a.",
+          "maxIterations": 8
+        }
+      },
+      "id": "446aa4ac-2203-5461-a287-3c4320b3bc8b",
+      "name": "ShopAssist AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        360,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "ffc93796-2b0d-5ef8-93b6-000d76f60d3f",
+      "name": "Groq Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "credentials": {
+        "groqApi": {
+          "id": "REPLACE_ME_groq",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableName": "n8n_chat_histories",
+        "contextWindowLength": 10
+      },
+      "id": "636bc4c3-7d3b-55b3-8f1b-735b8125df8a",
+      "name": "Postgres Chat Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        180,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME_postgres",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolName": "faq_knowledge",
+        "toolDescription": "Search the official UrbanThread store FAQ and policies: returns (15 days), refunds, exchanges, sizes, delivery times and charges, COD, payments, cancellations.",
+        "pineconeIndex": {
+          "__rl": true,
+          "value": "shopassist-cloud",
+          "mode": "list"
+        },
+        "topK": 4,
+        "includeDocumentMetadata": true,
+        "options": {
+          "pineconeNamespace": "faq",
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "source",
+                "value": "faq"
+              }
+            ]
+          }
+        }
+      },
+      "id": "bc0e37fd-bfff-5e46-b217-3d5cff63cdf3",
+      "name": "faq_knowledge",
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [
+        340,
+        300
+      ],
+      "credentials": {
+        "pineconeApi": {
+          "id": "REPLACE_ME_pinecone",
+          "name": "Pinecone account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "embed-multilingual-v3.0"
+      },
+      "id": "8524fe62-44e4-5ae1-a1aa-89c3525202f0",
+      "name": "Cohere Embeddings (faq)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsCohere",
+      "typeVersion": 1,
+      "position": [
+        340,
+        520
+      ],
+      "credentials": {
+        "cohereApi": {
+          "id": "REPLACE_ME_cohere",
+          "name": "Cohere account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolName": "website_knowledge",
+        "toolDescription": "Search summaries of UrbanThread web pages: courier partners, dispatch times, festive/Diwali delays, size and fit tips, offers and coupon codes, gift cards, loyalty points, garment care, sustainability.",
+        "pineconeIndex": {
+          "__rl": true,
+          "value": "shopassist-cloud",
+          "mode": "list"
+        },
+        "topK": 4,
+        "includeDocumentMetadata": true,
+        "options": {
+          "pineconeNamespace": "website",
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "source",
+                "value": "website"
+              }
+            ]
+          }
+        }
+      },
+      "id": "c0110b5b-5175-5666-a193-97d7b3d46f17",
+      "name": "website_knowledge",
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [
+        600,
+        300
+      ],
+      "credentials": {
+        "pineconeApi": {
+          "id": "REPLACE_ME_pinecone",
+          "name": "Pinecone account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "embed-multilingual-v3.0"
+      },
+      "id": "54b752aa-991f-5ef0-9ac1-33d9febaac5e",
+      "name": "Cohere Embeddings (website)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsCohere",
+      "typeVersion": 1,
+      "position": [
+        600,
+        520
+      ],
+      "credentials": {
+        "cohereApi": {
+          "id": "REPLACE_ME_cohere",
+          "name": "Cohere account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Look up a customer's order. Inputs: order_id (like UT1003) and phone_last4 (the last 4 digits of the phone number on the order, or empty if the customer has not given them). Order details are only returned when the digits match; otherwise follow the 'instruction' field of the result.",
+        "operation": "executeQuery",
+        "query": "-- $1 = order ID, $2 = last 4 digits of the phone number on the order\nWITH input AS (\n  SELECT UPPER(TRIM(COALESCE($1, ''))) AS oid,\n         RIGHT(REGEXP_REPLACE(COALESCE($2, ''), '[^0-9]', '', 'g'), 4) AS last4\n), o AS (\n  SELECT orders.* FROM orders, input WHERE orders.order_id = input.oid\n), fails AS (\n  SELECT count(*) AS n FROM verification_attempts v, input\n  WHERE v.order_id = input.oid AND NOT v.success AND v.created_at > now() - interval '15 minutes'\n), chk AS (\n  SELECT CASE\n    WHEN NOT EXISTS (SELECT 1 FROM o) THEN 'not_found'\n    WHEN (SELECT n FROM fails) >= 5 THEN 'locked'\n    WHEN length((SELECT last4 FROM input)) < 4 THEN 'need_phone'\n    WHEN (SELECT RIGHT(phone, 4) FROM o) = (SELECT last4 FROM input) THEN 'verified'\n    ELSE 'wrong_phone' END AS result\n), log AS (\n  INSERT INTO verification_attempts (order_id, success)\n  SELECT (SELECT oid FROM input), result = 'verified' FROM chk WHERE result IN ('verified', 'wrong_phone')\n)\nSELECT chk.result AS verification,\n  CASE chk.result\n    WHEN 'verified' THEN 'Identity verified. Share these order details with the customer.'\n    WHEN 'need_phone' THEN 'Do NOT share any order details. Ask the customer for the last 4 digits of the phone number used for this order.'\n    WHEN 'wrong_phone' THEN 'The digits do not match this order. Do NOT share any order details. Ask the customer to check the number, or offer a human agent.'\n    WHEN 'locked' THEN 'Too many wrong attempts for this order. Do NOT share any details. Offer to connect the customer with a human (escalate_to_human).'\n    ELSE 'No order with this ID. Ask the customer to check the order ID (format UT followed by 4 digits).' END AS instruction,\n  o.order_id, o.customer_name, o.items, o.amount_inr, o.payment_method, o.status, o.city,\n  o.order_date::text AS order_date, o.expected_delivery::text AS expected_delivery, o.courier, o.tracking_no,\n  (SELECT string_agg(e.status || ' (' || to_char(e.created_at, 'DD Mon') || ')', ' -> ' ORDER BY e.created_at)\n     FROM order_events e WHERE e.order_id = o.order_id) AS history\nFROM chk LEFT JOIN o ON chk.result = 'verified';",
+        "options": {
+          "queryReplacement": "={{ [ $fromAI('order_id', 'The order ID given by the customer, e.g. UT1003', 'string', ''), $fromAI('phone_last4', 'Last 4 digits of the phone number on the order, or empty string', 'string', '') ] }}"
+        }
+      },
+      "id": "b6c98274-72b4-546d-9c89-e8d241a6c54a",
+      "name": "order_lookup",
+      "type": "n8n-nodes-base.postgresTool",
+      "typeVersion": 2.5,
+      "position": [
+        860,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME_postgres",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "escalate_to_human",
+        "description": "Create a support ticket and alert the human support team (Slack, SMS, e-mail). Use when the customer is angry, wants a refund above Rs 5,000, asks for a human, or the answer is not in the knowledge bases. Returns the ticket ID to give to the customer.",
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_WORKFLOW_04_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "customer_name": "={{ $fromAI('customer_name', 'Customer name, or Unknown', 'string', 'Unknown') }}",
+            "phone": "={{ $fromAI('phone', 'Customer phone number, or empty string', 'string', '') }}",
+            "order_id": "={{ $fromAI('order_id', 'Order ID like UT1003, or empty string', 'string', '') }}",
+            "reason": "={{ $fromAI('reason', 'Why you are escalating: angry customer, refund over Rs 5000, no answer found, or human requested', 'string', 'Customer needs help from a human') }}",
+            "conversation_summary": "={{ $fromAI('conversation_summary', 'Short summary of the conversation and the exact problem of the customer', 'string', 'See the chat history') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "customer_name",
+              "displayName": "customer_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "order_id",
+              "displayName": "order_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "conversation_summary",
+              "displayName": "conversation_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "id": "a480067f-31e8-5bc0-82db-890619bee46b",
+      "name": "escalate_to_human",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2,
+      "position": [
+        1060,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "name": "inventory_expert",
+        "description": "Ask the Inventory Agent (domain expert for stock and procurement). Use for product availability, sizes in stock, low stock, restocking and purchase orders. Send the full question; it returns the answer.",
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_WORKFLOW_06_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "question": "={{ $fromAI('question', 'The full question about stock, availability, restocking or purchase orders', 'string', 'Which products are low on stock?') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "question",
+              "displayName": "question",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "id": "783e91b1-8161-5ab7-b4b6-6e2ed0e66e04",
+      "name": "inventory_expert",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2,
+      "position": [
+        1260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Detect Intent (rules) - deterministic pre-check that runs BEFORE the AI agent (workflow 03).\n// Small local models follow one short, explicit note much better than a long system prompt, so this step spots\n// clear signals and appends a \"[NOTE FOR ASSISTANT: ...]\" to the message. It also returns `intent` flags that the\n// guaranteed-escalation step after the agent uses (so escalation never depends on the model alone).\n// Unit-tested in tests/test_guardrails.py (runs this exact code with Node).\nconst msg = String($json.chatInput || '');\nconst m = msg.toLowerCase();\nconst notes = [];\n\n// --- language: Hindi script, or Hinglish (Hindi written in English letters) -------------------------------\nconst HINGLISH = ['kya', 'hai', 'hain', 'mera', 'meri', 'mere', 'mujhe', 'kab', 'kaise', 'kyu', 'kyun', 'nahi', 'nahin',\n  'aayega', 'aaya', 'ayega', 'chahiye', 'karo', 'karna', 'bhai', 'yaar', 'abhi', 'jaldi', 'paisa', 'paise', 'wapas',\n  'vapas', 'kitna', 'kitne', 'gaya', 'hua', 'ho', 'tak', 'ke', 'ki', 'ka', 'aur', 'bhi', 'milega', 'batao', 'kab tak'];\nconst words = m.split(/[^a-z]+/).filter(Boolean);\nconst hinglishHits = words.filter(w => HINGLISH.includes(w)).length;\nconst language = /[ऀ-ॿ]/.test(msg) ? 'hi' : (hinglishHits >= 2 ? 'hinglish' : 'en');\nif (language === 'hi') notes.push('The customer writes in Hindi: reply in simple Hindi (Devanagari). Search the knowledge tools in English.');\nif (language === 'hinglish') notes.push('The customer writes in Hinglish: reply in friendly Hinglish (Hindi in English letters). Search the knowledge tools in English.');\n\n// --- anger, sarcasm, shouting -------------------------------------------------------------------------------\nconst ANGRY = /manager|human|real person|complain|worst|third time|angry|furious|ridiculous|fed up|cheat|fraud|useless|pathetic|scam|consumer court|bad review|bakwas|bakwaas|bekaar|bekar|ghatiya|faltu|dhokha|chor|kitni baar|third class|bahut bura|गुस्सा|बकवास|धोखा|मैनेजर|😡|🤬|😤/;\nconst PRAISE = '(wow|great|amazing|awesome|fantastic|brilliant|superb|love (it|this|waiting)|thanks a lot|thank you so much|so fast|super fast|bravo|well done|nice job|great job)';\nconst PROBLEM = '(still|again|late|never|not|no one|nobody|waiting|delay|delayed|weeks?|lost|missing)';\nconst SARCASM = new RegExp(`\\\\b${PRAISE}\\\\b[^.!?]{0,80}\\\\b${PROBLEM}\\\\b|\\\\b${PROBLEM}\\\\b[^.!?]{0,80}\\\\b${PRAISE}\\\\b|🙄|🙃|👏👏|/s\\\\b`);\nconst letters = msg.replace(/[^A-Za-z]/g, '');\nconst shouting = /!!!/.test(msg) || (letters.length >= 12 && letters.replace(/[^A-Z]/g, '').length / letters.length > 0.7);\nconst sarcastic = SARCASM.test(m);\nconst angry = ANGRY.test(m) || sarcastic || shouting;\nif (angry)\n  notes.push((sarcastic ? 'The customer is being sarcastic - they are actually upset. ' : '') +\n    'The customer is upset or asks for a human: apologise, look up the order if an order ID is given, then you MUST call escalate_to_human and give the ticket ID.');\n\n// --- refund over the limit -----------------------------------------------------------------------------------\nconst refund = /refund|money back|paise? wapas|paisa wapas|paise? vapas|paisa vapas|रिफंड|पैसे वापस/.test(m);\nif (refund && /ut\\d{4}/.test(m))\n  notes.push('Refund request: call order_lookup; if the order amount is more than Rs 5000 you MUST call escalate_to_human (you cannot approve it) and give the ticket ID.');\n\n// --- stock, returns, offers, out of scope --------------------------------------------------------------------\nif (/\\b(stock|in stock|available|availability|restock|reorder|purchase order|inventory|low stock|milega|available hai)\\b/.test(m) && !/stock market/.test(m))\n  notes.push('This is about stock or purchase orders: call inventory_expert with the full question (in English) and pass its answer on. Do not guess availability.');\nif (/return|exchange|does not fit|doesn't fit|too (small|big|tight|loose)|wrong size|wapas|vapas|chota|bada|fit nahi/.test(m) && /ut\\d{4}/.test(m))\n  notes.push('Return question about an order: call order_lookup for the order AND faq_knowledge for the return and refund policy, then answer with both (no stock check needed).');\nif (/diwali|discount|coupon|promo|offer|sale|code|gift card|loyalty/.test(m) && !/python|javascript|script|program/.test(m))\n  notes.push('Offers and coupon codes: call website_knowledge first and give ONLY codes that appear in its result. Never invent a code.');\nif (/python|javascript|java |code|script|program|homework|essay|poem|recipe|weather|cricket|movie|stock market|bitcoin/.test(m)\n    && !/order|ut\\d{4}|return|refund|size|deliver|kurta|shirt|jeans|hoodie|in stock|restock|low stock|coupon|discount/.test(m))\n  notes.push('This is NOT about UrbanThread. Do not answer it and do not write code: reply that you can only help with UrbanThread orders, returns, sizes, delivery, offers and stock.');\n\n// --- identity check for orders: order ID + last 4 digits of the phone ----------------------------------------\nconst oid = (msg.toUpperCase().match(/UT\\d{4}/) || [''])[0];\nconst phone = (msg.replace(/[\\s-]/g, '').match(/(\\+?91)?[6-9]\\d{9}/) || [''])[0];\nconst noOid = msg.replace(/UT\\d{4}/gi, ' ');\nconst last4 = phone ? phone.slice(-4) : ((noOid.match(/(?:^|\\D)(\\d{4})(?!\\d)/) || ['', ''])[1]);\nif (oid && last4) notes.push(`Call order_lookup with order_id ${oid} and phone_last4 ${last4}.`);\nelse if (oid) notes.push(`Call order_lookup with order_id ${oid} and an empty phone_last4; it will tell you to ask for the last 4 digits of the phone number. Never share order details before they are verified.`);\nelse if (last4 && /^\\D*\\d{4}\\D*$/.test(msg.trim())) notes.push(`The customer sent 4 digits (${last4}): these are the last 4 digits of their phone for the order ID mentioned earlier in this chat. Call order_lookup with that order ID and phone_last4 ${last4}.`);\n\n// --- flags for the guaranteed-escalation step after the agent ------------------------------------------------\nconst name = (msg.match(/\\b(?:i am|i'm|my name is|this is|main)\\s+([A-Z][a-z]+)/) || ['', ''])[1];\nconst intent = { escalate: angry, sarcastic, refund, language, order_id: oid, phone, last4, name, original: msg };\nreturn [{ json: { ...$json, intent,\n  chatInput: notes.length ? msg + '\\n\\n[NOTE FOR ASSISTANT: ' + notes.join(' ') + ']' : msg } }];\n"
+      },
+      "id": "e975a0ac-38ae-5f51-a63c-777cd3c1a35d",
+      "name": "Detect Intent (rules)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        180,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- internal check only (amount for the refund rule); details are shown only if verified = true\nSELECT order_id, customer_name, phone, amount_inr, items, status, expected_delivery::text AS expected_delivery, courier, tracking_no,\n       (length($2) = 4 AND RIGHT(phone, 4) = $2) AS verified\nFROM orders\nWHERE order_id = UPPER(TRIM($1)) LIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ [ $('Detect Intent (rules)').item.json.intent.order_id || 'none', $('Detect Intent (rules)').item.json.intent.last4 || '' ] }}"
+        }
+      },
+      "id": "229f7c43-11e0-5142-9353-e82775592d7b",
+      "name": "Order Details (for escalation check)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        720,
+        -220
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME_postgres",
+          "name": "Supabase Postgres"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Decide if a human ticket is required but the agent did not create one.\nconst intent = $('Detect Intent (rules)').first().json.intent || {};\nconst order = $json.order_id ? $json : {};\nlet reply = String($('ShopAssist AI Agent').first().json.output || '').trim();\nif (!reply) {  // the AI step failed (e.g. bad tool call): answer from the database / rules instead\n  const r = order.order_id && order.verified ? order : null;  // never show details without the phone check\n  reply = r ? `Your order ${r.order_id} (${r.items}) is ${String(r.status).replace(/_/g, ' ')}. Expected delivery: ${String(r.expected_delivery).slice(0, 10)}, courier ${r.courier}, tracking ${r.tracking_no}.`\n    : (intent.escalate || intent.refund) ? 'I am sorry for the trouble. Let me connect you with our support team.'\n    : 'Sorry, I could not process that just now. Please share your order ID (like UT1003) or ask about returns, sizes, delivery, offers or stock.';\n}\nconst bigRefund = intent.refund && Number(order.amount_inr || 0) > 5000;\nconst needs = (intent.escalate || bigRefund) && !/TKT-\\d+/.test(reply);\nconst reason = intent.escalate ? 'Customer is upset or asked for a human' : 'Refund above Rs 5,000 needs human approval';\nreturn [{ json: { needs_ticket: needs, reply, language: intent.language || 'en',\n  customer_name: intent.name || order.customer_name || 'Unknown',\n  phone: intent.phone || order.phone || '',\n  order_id: intent.order_id || '',\n  reason,\n  conversation_summary: (reason + '. Customer wrote: ' + String(intent.original || '')).slice(0, 1500) } }];\n"
+      },
+      "id": "34bac979-d404-511a-9cc2-081a637866fc",
+      "name": "Needs a Ticket? (rules)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.needs_ticket }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "70c40f3b-e02c-5318-83b0-53138b121b92",
+      "name": "Ticket Missing?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1160,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_WORKFLOW_04_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "customer_name": "={{ $json.customer_name }}",
+            "phone": "={{ $json.phone }}",
+            "order_id": "={{ $json.order_id }}",
+            "reason": "={{ $json.reason }}",
+            "conversation_summary": "={{ $json.conversation_summary }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "customer_name",
+              "displayName": "customer_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "order_id",
+              "displayName": "order_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "conversation_summary",
+              "displayName": "conversation_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "4db60866-ac84-5fda-9838-ba67916c5edc",
+      "name": "Create Ticket (workflow 04)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1380,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "o1",
+              "name": "output",
+              "type": "string",
+              "value": "={{ $('Needs a Ticket? (rules)').item.json.reply }}\n\n{{ {hinglish: 'Maine aapki problem hamari support team ko bhej di hai. Aapka ticket ID ' + $json.ticket_id + ' hai - 4 business hours mein team aapse contact karegi.', hi: 'मैंने आपकी समस्या हमारी सपोर्ट टीम को भेज दी है। आपका टिकट ID ' + $json.ticket_id + ' है - 4 कार्य घंटों में टीम आपसे संपर्क करेगी।'}[$('Needs a Ticket? (rules)').item.json.language] || 'I have passed this to our human support team. Your ticket ID is ' + $json.ticket_id + ' - a team member will contact you within 4 business hours.' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f4fc0288-5835-5c6f-93eb-0030f82bd04f",
+      "name": "Reply + Ticket ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1600,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "o2",
+              "name": "output",
+              "type": "string",
+              "value": "={{ $json.reply }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4bb609db-799e-53f5-b0a7-f1e6a8b6d447",
+      "name": "Reply",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1380,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Setup notes\n1. Import workflow 04 first, copy its ID from the URL, and select it in **escalate_to_human**.\n2. Set credentials on every node with a ⚠ warning.\n3. **Activate** the workflow, open the Chat Trigger and copy the **public chat URL**.\n4. The system prompt lives in `prompts/agent_system_prompt.md` (rules: answer only from tools, cite source, ask for order ID, escalate if angry / refund > Rs 5,000 / no answer).",
+        "width": 420,
+        "height": 300
+      },
+      "id": "67da0fae-f0aa-59bd-be00-653f370b63b8",
+      "name": "Setup notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1480,
+        120
+      ]
+    }
+  ],
+  "connections": {
+    "Cohere Embeddings (faq)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "faq_knowledge",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "faq_knowledge": {
+      "ai_tool": [
+        [
+          {
+            "node": "ShopAssist AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cohere Embeddings (website)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "website_knowledge",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "website_knowledge": {
+      "ai_tool": [
+        [
+          {
+            "node": "ShopAssist AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "order_lookup": {
+      "ai_tool": [
+        [
+          {
+            "node": "ShopAssist AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "escalate_to_human": {
+      "ai_tool": [
+        [
+          {
+            "node": "ShopAssist AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "inventory_expert": {
+      "ai_tool": [
+        [
+          {
+            "node": "ShopAssist AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Public Chat (UrbanThread)": {
+      "main": [
+        [
+          {
+            "node": "Detect Intent (rules)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Intent (rules)": {
+      "main": [
+        [
+          {
+            "node": "ShopAssist AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ShopAssist AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Order Details (for escalation check)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Order Details (for escalation check)": {
+      "main": [
+        [
+          {
+            "node": "Needs a Ticket? (rules)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs a Ticket? (rules)": {
+      "main": [
+        [
+          {
+            "node": "Ticket Missing?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ticket Missing?": {
+      "main": [
+        [
+          {
+            "node": "Create Ticket (workflow 04)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Ticket (workflow 04)": {
+      "main": [
+        [
+          {
+            "node": "Reply + Ticket ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "ShopAssist AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "ShopAssist AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "executionTimeout": 240
+  },
+  "active": false,
+  "tags": []
+}

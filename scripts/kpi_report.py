@@ -34,6 +34,11 @@ c = (k.get("chat_totals") or [{}])
 c = c[0] if isinstance(c, list) and c else {}
 conv, tickets = int(c.get("conversations") or 0), int(t.get("tickets") or 0)
 rate = f"{(1 - tickets / conv) * 100:.0f}%" if conv else "n/a"
+cs = (k.get("csat") or [{}])
+cs = cs[0] if isinstance(cs, list) and cs else {}
+csat = f"{int(cs.get('thumbs_up') or 0) / int(cs['ratings']) * 100:.0f}% of {cs['ratings']} ratings" if cs.get("ratings") else "no ratings yet"
+v = (k.get("verification") or [{}])
+v = v[0] if isinstance(v, list) and v else {}
 
 md = ["# ShopAssist KPI report\n", f"Generated {datetime.datetime.now():%d %b %Y %H:%M} from the live database.\n",
       "## Headline numbers\n",
@@ -41,11 +46,14 @@ md = ["# ShopAssist KPI report\n", f"Generated {datetime.datetime.now():%d %b %Y
       f"- Escalated to a human (tickets): **{tickets}** ({t.get('high_priority') or 0} high priority, "
       f"{t.get('angry') or 0} angry customers, {t.get('open') or 0} still open)",
       f"- Conversations resolved without a human (approx.): **{rate}**",
+      f"- Customer satisfaction (thumbs up in the web app): **{csat}**",
+      f"- Identity checks last 7 days: **{v.get('verified') or 0}** verified, **{v.get('failed') or 0}** wrong digits (blocked)",
       f"- Products at or below reorder level: **{len(k['low_stock']) if isinstance(k.get('low_stock'), list) else 'n/a'}**",
       f"- Purchase orders drafted by the Inventory Agent: **{len(k['purchase_orders']) if isinstance(k.get('purchase_orders'), list) else 'n/a'}**\n"]
 for title, key in [("Orders by status", "orders_by_status"), ("Tickets by type and priority", "tickets_by_type"),
                    ("Low stock", "low_stock"), ("Latest purchase orders", "purchase_orders"),
-                   ("Latest tickets", "recent_tickets")]:
+                   ("Latest tickets", "recent_tickets"), ("Tickets by language", "tickets_by_language"),
+                   ("Latest order events", "recent_events")]:
     md += [f"## {title}\n"] + table(k.get(key)) + [""]
 text = "\n".join(md)
 print(text)

@@ -4,6 +4,7 @@ Only the Python standard library, plus `pg8000` for database features (pip3 inst
 Never prints secrets.
 """
 import json
+import os
 import socket
 import ssl
 import time
@@ -31,6 +32,9 @@ def load_env():
 
 
 ENV = load_env()
+# Real environment variables win over .env (Docker Compose, Render and CI pass settings this way).
+ENV.update({k: v for k, v in os.environ.items() if k.startswith(("N8N_", "POSTGRES_", "OLLAMA_", "PINECONE_", "GROQ_",
+                                                                   "COHERE_", "JUDGE_", "ADMIN_", "APP_", "CHAT_"))})
 N8N = (ENV.get("N8N_URL") or "http://localhost:5679").rstrip("/")
 OLLAMA = (ENV.get("OLLAMA_URL") or "http://localhost:11434").rstrip("/")
 
@@ -72,8 +76,15 @@ def workflows():
     return out
 
 
+# The chat trigger's webhook ID is fixed by scripts/build_workflows.py (uuid5 of "shopassist-chat"), so the chat
+# URL is known even without an n8n API key (e.g. the hosted web app).
+CHAT_WEBHOOK_ID = str(uuid.uuid5(uuid.NAMESPACE_URL, "shopassist-chat"))
+
+
 def chat_url():
     """Production chat URL of workflow 03 (always on N8N_URL's port, so the port problem cannot happen)."""
+    if not ENV.get("N8N_API_KEY"):
+        return f"{N8N}/webhook/{CHAT_WEBHOOK_ID}/chat"
     wfs = workflows()
     w3 = wfs.get("03")
     if not w3:
@@ -146,8 +157,14 @@ KPI_QUERIES = {
     "chat_totals": "SELECT count(DISTINCT session_id) AS conversations, sum((message->>'type' = 'human')::int) AS customer_messages "
                    "FROM n8n_chat_histories",
     "low_stock": "SELECT sku, name, size, stock, reorder_level FROM products WHERE stock <= reorder_level ORDER BY stock - reorder_level",
-    "purchase_orders": "SELECT po_id, sku, quantity, est_cost_inr, status, created_at FROM purchase_orders ORDER BY id DESC LIMIT 10",
-    "recent_tickets": "SELECT ticket_id, customer_name, order_id, issue_type, priority, created_at FROM tickets ORDER BY id DESC LIMIT 8",
+    "purchase_orders": "SELECT po_id, sku, quantity, est_cost_inr, status, decided_by, created_at FROM purchase_orders ORDER BY id DESC LIMIT 10",
+    "recent_tickets": "SELECT ticket_id, customer_name, order_id, issue_type, sentiment, priority, language, status, created_at "
+                      "FROM tickets ORDER BY id DESC LIMIT 8",
+    "csat": "SELECT count(*) AS ratings, sum((rating = 1)::int) AS thumbs_up FROM chat_feedback",
+    "recent_events": "SELECT order_id, status, note, created_at FROM order_events ORDER BY created_at DESC, id DESC LIMIT 8",
+    "verification": "SELECT sum(success::int) AS verified, sum((NOT success)::int) AS failed FROM verification_attempts "
+                    "WHERE created_at > now() - interval '7 days'",
+    "tickets_by_language": "SELECT COALESCE(language, 'en') AS language, count(*) AS tickets FROM tickets GROUP BY 1 ORDER BY 2 DESC",
 }
 
 

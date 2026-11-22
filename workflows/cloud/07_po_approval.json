@@ -1,0 +1,379 @@
+{
+  "name": "07 Purchase Order Approval (Manager)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Overview – Workflow 07\n**Human-in-the-loop approval** for purchase orders drafted by the Inventory Agent (06).\n\n1. Slack message (06) / dashboard → `GET /webhook/po-review?po=PO-0001&token=…` shows a review page (changes nothing – link previews and e-mail scanners can open it safely).\n2. Manager presses **Approve** or **Reject** → `POST /webhook/po-decision` → PO updated only if the secret token matches and it is still *pending_approval* → Slack confirmation → if approved, SMS to the supplier (Twilio).\n\nCourse: webhooks, IF, Postgres, Slack, Twilio, human-in-the-loop.",
+        "width": 620,
+        "height": 380,
+        "color": 4
+      },
+      "id": "d8e901cc-d263-59f3-a9dc-0e68244e3256",
+      "name": "Overview – Workflow 07",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -120,
+        -460
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "po-review",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "ffb3b93b-d679-51f2-8485-c18756b6e278",
+      "name": "Review Link (GET)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "33f1edd5-0066-5634-b09b-5fa6c15beab7"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT po.po_id, po.quantity, po.supplier, po.est_cost_inr, po.status, po.reason, po.approval_token,\n       p.name || COALESCE(' (' || p.size || ')', '') AS product, p.stock, p.reorder_level\nFROM purchase_orders po JOIN products p ON p.sku = po.sku\nWHERE po.po_id = UPPER(TRIM($1)) AND po.approval_token = $2;",
+        "options": {
+          "queryReplacement": "={{ [ $json.query.po || '', $json.query.token || '' ] }}"
+        }
+      },
+      "id": "32545b3d-2d93-5c5e-8f1e-2acb8f2f906d",
+      "name": "Find Purchase Order",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME_postgres",
+          "name": "Supabase Postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ \"<!doctype html><title>Purchase order</title><meta name='viewport' content='width=device-width,initial-scale=1'><style>body{font-family:system-ui,sans-serif;background:#0f0e17;color:#fffffe;display:grid;place-items:center;min-height:100vh;margin:0;padding:16px}.c{background:#1b1a27;border-radius:20px;padding:24px;max-width:420px;width:100%;box-shadow:0 0 0 2px #c6ff3d33}h1{margin:0 0 8px;font-size:22px}p{color:#b8b5c9}b{color:#c6ff3d}button{font:600 16px system-ui;border:0;border-radius:999px;padding:12px 20px;margin:6px 6px 0 0;cursor:pointer}.ok{background:#c6ff3d;color:#0f0e17}.no{background:#2b2a3a;color:#fffffe}</style><div class='c'>\" + ($json.po_id ? ('<h1>📦 ' + $json.po_id + '</h1><p><b>' + $json.quantity + ' x ' + $json.product + '</b><br>Supplier: ' + $json.supplier + '<br>Estimated cost: Rs ' + $json.est_cost_inr + '<br>Stock now: ' + $json.stock + ' (reorder level ' + $json.reorder_level + ')<br>Reason: ' + ($json.reason || '-') + '</p>' + ($json.status === 'pending_approval' ? ('<form method=post action=po-decision><input type=hidden name=po value=' + $json.po_id + '><input type=hidden name=token value=' + $json.approval_token + '><button class=ok name=action value=approve>✅ Approve</button><button class=no name=action value=reject>❌ Reject</button></form>') : ('<p>Already <b>' + $json.status + '</b>.</p>'))) : '<h1>🔒 Link not valid</h1><p>Check the link in Slack.</p>') + '</div>' }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "id": "25968ba5-db4d-53d5-ae8a-0e85f54182be",
+      "name": "Show Review Page",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "po-decision",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "48e7c763-b33a-5ea4-a139-9325758bdf4b",
+      "name": "Decision (POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        320
+      ],
+      "webhookId": "0f08ba78-8b47-5ab7-bead-5e9b29738d59"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- $1 = PO ID, $2 = approve / reject, $3 = secret token from the link, $4 = who decided\nUPDATE purchase_orders po\nSET status = CASE WHEN LOWER($2) = 'approve' THEN 'approved' ELSE 'rejected' END,\n    decided_at = now(), decided_by = COALESCE(NULLIF(TRIM($4), ''), 'manager')\nFROM products p\nWHERE p.sku = po.sku AND po.po_id = UPPER(TRIM($1)) AND po.approval_token = $3\n  AND po.status = 'pending_approval' AND LOWER($2) IN ('approve', 'reject')\nRETURNING po.po_id, po.sku, po.quantity, po.supplier, po.est_cost_inr, po.status, po.decided_by,\n          p.name || COALESCE(' (' || p.size || ')', '') AS product, p.supplier_phone;",
+        "options": {
+          "queryReplacement": "={{ [ $json.body.po || '', $json.body.action || '', $json.body.token || '', $json.body.by || '' ] }}"
+        }
+      },
+      "id": "942eef38-d4e9-5fdf-a7c1-429e79cb53dc",
+      "name": "Apply Decision (token check)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        220,
+        320
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME_postgres",
+          "name": "Supabase Postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "v1",
+              "leftValue": "={{ $json.po_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "62cad868-8ce5-5aae-84aa-f594ebad13fe",
+      "name": "Valid Decision?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#support-escalations",
+          "mode": "name"
+        },
+        "text": "={{ $json.status === 'approved' ? ':white_check_mark:' : ':x:' }} *{{ $json.po_id }}* {{ $json.status }} by {{ $json.decided_by }}: {{ $json.quantity }} x {{ $json.product }} from {{ $json.supplier }} (approx. Rs {{ $json.est_cost_inr }})",
+        "otherOptions": {}
+      },
+      "id": "61fc77bd-7bd8-5892-8e8a-0ab204ec21e6",
+      "name": "Tell Team in Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        660,
+        220
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_ME_slack",
+          "name": "Slack account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a1",
+              "leftValue": "={{ $('Apply Decision (token check)').item.json.status }}",
+              "rightValue": "approved",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e5580e0c-a4cd-59c5-bb90-aa603691aa79",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "from": "+10000000000",
+        "to": "={{ $('Apply Decision (token check)').item.json.supplier_phone }}",
+        "message": "=UrbanThread purchase order {{ $('Apply Decision (token check)').item.json.po_id }}: please supply {{ $('Apply Decision (token check)').item.json.quantity }} x {{ $('Apply Decision (token check)').item.json.product }} (SKU {{ $('Apply Decision (token check)').item.json.sku }}). Reply to confirm the delivery date.",
+        "options": {}
+      },
+      "id": "6af93b60-77c4-5b62-ac50-40fd4dd76ab3",
+      "name": "SMS Supplier (Twilio)",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        120
+      ],
+      "credentials": {
+        "twilioApi": {
+          "id": "REPLACE_ME_twilio",
+          "name": "Twilio account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $('Decision (POST)').item.json.body.format === 'json' ? JSON.stringify({ ok: !!$('Apply Decision (token check)').item.json.po_id, po_id: $('Apply Decision (token check)').item.json.po_id || null, status: $('Apply Decision (token check)').item.json.status || null, message: $('Apply Decision (token check)').item.json.po_id ? ('Purchase order ' + $('Apply Decision (token check)').item.json.status) : 'Link not valid or already decided' }) : \"<!doctype html><title>Purchase order</title><meta name='viewport' content='width=device-width,initial-scale=1'><style>body{font-family:system-ui,sans-serif;background:#0f0e17;color:#fffffe;display:grid;place-items:center;min-height:100vh;margin:0;padding:16px}.c{background:#1b1a27;border-radius:20px;padding:24px;max-width:420px;width:100%;box-shadow:0 0 0 2px #c6ff3d33}h1{margin:0 0 8px;font-size:22px}p{color:#b8b5c9}b{color:#c6ff3d}button{font:600 16px system-ui;border:0;border-radius:999px;padding:12px 20px;margin:6px 6px 0 0;cursor:pointer}.ok{background:#c6ff3d;color:#0f0e17}.no{background:#2b2a3a;color:#fffffe}</style><div class='c'>\" + ($('Apply Decision (token check)').item.json.po_id ? ('<h1>' + ($('Apply Decision (token check)').item.json.status === 'approved' ? '✅ ' : '❌ ') + $('Apply Decision (token check)').item.json.po_id + ' ' + $('Apply Decision (token check)').item.json.status + '</h1><p>The team was told in Slack' + ($('Apply Decision (token check)').item.json.status === 'approved' ? ' and the supplier got an SMS' : '') + '.</p>') : '<h1>🔒 Not changed</h1><p>The link is not valid or this order was already decided.</p>') + '</div>' }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "={{ $('Decision (POST)').item.json.body.format === 'json' ? 'application/json' : 'text/html; charset=utf-8' }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "eca0e88a-885d-5f2e-ad2b-21c9f85cc83b",
+      "name": "Show Result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        320
+      ]
+    }
+  ],
+  "connections": {
+    "Review Link (GET)": {
+      "main": [
+        [
+          {
+            "node": "Find Purchase Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Purchase Order": {
+      "main": [
+        [
+          {
+            "node": "Show Review Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decision (POST)": {
+      "main": [
+        [
+          {
+            "node": "Apply Decision (token check)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply Decision (token check)": {
+      "main": [
+        [
+          {
+            "node": "Valid Decision?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid Decision?": {
+      "main": [
+        [
+          {
+            "node": "Tell Team in Slack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Show Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tell Team in Slack": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "SMS Supplier (Twilio)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Show Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SMS Supplier (Twilio)": {
+      "main": [
+        [
+          {
+            "node": "Show Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "executionTimeout": 60
+  },
+  "active": false,
+  "tags": []
+}

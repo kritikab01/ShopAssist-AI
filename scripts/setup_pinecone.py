@@ -9,6 +9,7 @@ Run on your own computer, in the repo folder (reads PINECONE_API_KEY from .env):
 - index exists, other size -> asks "type DELETE" before deleting and recreating it
   (an index's dimension can never be changed; the old vectors are useless anyway)
 
+    python3 scripts/setup_pinecone.py --cloud        # index "shopassist-cloud", 1024 dims (Cohere, cloud version)
     python3 scripts/setup_pinecone.py --clean-old
 
 removes the vectors that the first version stored in the default namespace. Since v2 the FAQ lives in
@@ -25,6 +26,9 @@ import urllib.request
 from pathlib import Path
 
 DIMENSION, METRIC = 768, "cosine"
+CLOUD = "--cloud" in sys.argv  # cloud profile: Cohere embed-multilingual-v3.0 -> 1024 dims, index shopassist-cloud
+if CLOUD:
+    DIMENSION = 1024
 ROOT = Path(__file__).resolve().parent.parent
 
 # Prefer IPv4 (some Wi-Fi networks hang on IPv6).
@@ -38,7 +42,7 @@ if (ROOT / ".env").exists():
             k, v = line.split("=", 1)
             env[k.strip()] = v.split(" #")[0].strip().strip('"').strip("'")
 key = env.get("PINECONE_API_KEY", "")
-name = env.get("PINECONE_INDEX") or "shopassist"
+name = "shopassist-cloud" if CLOUD else (env.get("PINECONE_INDEX") or "shopassist")
 if not key or "REPLACE_ME" in key:
     sys.exit("PINECONE_API_KEY missing in .env (app.pinecone.io -> API Keys).")
 H = {"Api-Key": key, "X-Pinecone-API-Version": "2025-01", "Content-Type": "application/json"}
@@ -85,7 +89,7 @@ if st == 200:
         print(f"OK: index '{name}' already has dimension {DIMENSION} and metric {METRIC}. Nothing to do.")
         sys.exit(0)
     print(f"Index '{name}' has dimension {idx.get('dimension')} / metric {idx.get('metric')}, "
-          f"but Ollama's nomic-embed-text needs {DIMENSION} / {METRIC}.")
+          f"but the embedding model needs {DIMENSION} / {METRIC}.")
     if input("Type DELETE to delete it and create it again with the right size: ").strip() != "DELETE":
         sys.exit("Nothing changed.")
     st, r = call("DELETE", f"/indexes/{name}")

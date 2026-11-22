@@ -126,3 +126,7 @@ ALTER TABLE tickets ADD COLUMN IF NOT EXISTS language VARCHAR(10) DEFAULT 'en';
 ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS approval_token VARCHAR(32) NOT NULL DEFAULT md5(random()::text || clock_timestamp()::text);
 ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS decided_at TIMESTAMPTZ;
 ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS decided_by VARCHAR(60);
+
+-- Cloud version (render.yaml): n8n keeps its own tables (workflows, credentials, executions) in this separate
+-- schema of the same free Supabase database, so they never mix with the store's tables.
+CREATE SCHEMA IF NOT EXISTS n8n;

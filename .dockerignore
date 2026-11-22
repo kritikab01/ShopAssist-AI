@@ -1,0 +1,7 @@
+.env
+.env.*
+.git
+docs
+workflows
+tests
+**/__pycache__

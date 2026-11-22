@@ -25,6 +25,13 @@ CHAT_MODEL = "qwen2.5:3b"
 EMBED_MODEL = "nomic-embed-text"  # 768-dim vectors -> Pinecone index must be dimension 768
 NUM_CTX = 8192  # Ollama's default context (2048 tokens) is too small for the agent prompt + search results
 
+# Cloud profile (python3 scripts/build_workflows.py --cloud -> workflows/cloud/*.json), for hosting without a
+# laptop: Groq (free API, fast Llama models with tool calling) for chat and Cohere multilingual embeddings
+# (free trial key, 1024 dims, also understands Hindi) -> its own Pinecone index "shopassist-cloud" (1024 dims).
+CLOUD = {"chat_model": "llama-3.3-70b-versatile", "embed_model": "embed-multilingual-v3.0",
+         "index": "shopassist-cloud", "dimension": 1024}
+PROFILE = "local"  # set by main(): "local" (Ollama) or "cloud" (Groq + Cohere)
+
 # Placeholder credentials: after import, open each node and pick your own credential.
 CRED = {
     "ollamaApi": {"id": "REPLACE_ME_ollama", "name": "Ollama account"},
@@ -33,6 +40,8 @@ CRED = {
     "slackApi": {"id": "REPLACE_ME_slack", "name": "Slack account"},
     "twilioApi": {"id": "REPLACE_ME_twilio", "name": "Twilio account"},
     "smtp": {"id": "REPLACE_ME_smtp", "name": "Gmail SMTP"},
+    "groqApi": {"id": "REPLACE_ME_groq", "name": "Groq account"},
+    "cohereApi": {"id": "REPLACE_ME_cohere", "name": "Cohere account"},
 }
 TWILIO_FROM = "+10000000000"  # placeholder: replace with your Twilio phone number in n8n
 SUPPORT_EMAIL = "support@urbanthread.example"  # placeholder: replace with your own inbox
@@ -146,12 +155,19 @@ class WF:
         print("wrote", path.relative_to(ROOT) if path.is_relative_to(ROOT) else path)
 
 
+def index_name():
+    return CLOUD["index"] if PROFILE == "cloud" else PINECONE_INDEX
+
+
 def rl(value, mode="list"):
     """n8n 'resource locator' value (used for models, Pinecone index, Slack channel...)."""
     return {"__rl": True, "value": value, "mode": mode}
 
 
 def ollama_chat(wf, name, pos, temperature=0.2, json_mode=False):
+    if PROFILE == "cloud":
+        return wf.node(name.replace("Ollama", "Groq"), "@n8n/n8n-nodes-langchain.lmChatGroq", 1, pos,
+                       {"model": CLOUD["chat_model"], "options": {"temperature": temperature}}, ["groqApi"])
     options = {"temperature": temperature, "numCtx": NUM_CTX,
                "think": False}  # qwen2.5 is not a "thinking" model; n8n's default (true) can be rejected
     if json_mode:
@@ -161,6 +177,9 @@ def ollama_chat(wf, name, pos, temperature=0.2, json_mode=False):
 
 
 def ollama_embeddings(wf, name, pos):
+    if PROFILE == "cloud":
+        return wf.node(name.replace("Ollama", "Cohere"), "@n8n/n8n-nodes-langchain.embeddingsCohere", 1, pos,
+                       {"modelName": CLOUD["embed_model"]}, ["cohereApi"])
     return wf.node(name, "@n8n/n8n-nodes-langchain.embeddingsOllama", 1, pos,
                    {"model": EMBED_MODEL}, ["ollamaApi"])
 
@@ -176,7 +195,7 @@ def pinecone_insert(wf, name, pos, namespace):
     n8n (node 1.3) collects all documents first and inserts them in batches of embeddingBatchSize; the namespace
     is cleared before each batch, so the batch size is set far above our document count -> cleared exactly once."""
     return wf.node(name, "@n8n/n8n-nodes-langchain.vectorStorePinecone", 1.3, pos,
-                   {"mode": "insert", "pineconeIndex": rl(PINECONE_INDEX), "embeddingBatchSize": 5000,
+                   {"mode": "insert", "pineconeIndex": rl(index_name()), "embeddingBatchSize": 5000,
                     "options": {"clearNamespace": True, "pineconeNamespace": namespace}},
                    ["pineconeApi"])
 
@@ -408,7 +427,7 @@ def wf03():
             "mode": "retrieve-as-tool",
             "toolName": name,
             "toolDescription": desc,
-            "pineconeIndex": rl(PINECONE_INDEX),
+            "pineconeIndex": rl(index_name()),
             "topK": 4,
             "includeDocumentMetadata": True,
             "options": {"pineconeNamespace": source, "metadata": metadata(("source", source))},
@@ -1060,7 +1079,19 @@ def wf07():
     wf.save("07_po_approval.json")
 
 
-if __name__ == "__main__":
-    OUT_DIR.mkdir(exist_ok=True)
-    for build in (wf01, wf02, wf03, wf04, wf05, wf06, wf07):
+BUILDERS = (wf01, wf02, wf03, wf04, wf05, wf06, wf07)
+
+
+def build_all(out_dir=None, profile="local"):
+    """Write all workflows for one profile. Local -> workflows/, cloud -> workflows/cloud/."""
+    global OUT_DIR, PROFILE
+    PROFILE = profile
+    OUT_DIR = Path(out_dir) if out_dir else (ROOT / "workflows" / ("cloud" if profile == "cloud" else ""))
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    for build in BUILDERS:
         build()
+
+
+if __name__ == "__main__":
+    build_all(profile="local")
+    build_all(profile="cloud")

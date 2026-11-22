@@ -1,0 +1,79 @@
+# ShopAssist - the whole stack with one command:   bash scripts/up.sh
+# (or: docker compose up -d --build)
+#
+#   postgres  Postgres 16 with database/schema.sql + seed.sql loaded on first start  -> localhost:5433
+#   n8n       n8n 2.48 (workflows are imported by scripts/import_to_n8n.py)           -> http://localhost:5679
+#   app       ShopAssist web app: chat + manager dashboard                            -> http://localhost:8501
+#   ollama    OPTIONAL (docker compose --profile ollama up -d). On a Mac run the Ollama app instead:
+#             it uses the Apple GPU, Docker cannot. n8n reaches it at host.docker.internal:11434.
+# Pinecone stays in the cloud (free Starter plan).
+# Already running an older n8n container on 5679? Stop it first, or set N8N_HOST_PORT=5680.
+name: shopassist
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: ${COMPOSE_DB_PASSWORD:-shopassist}
+    ports: ["127.0.0.1:${DB_HOST_PORT:-5433}:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./database/seed.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.48.7
+    ports: ["127.0.0.1:${N8N_HOST_PORT:-5679}:5678"]
+    environment:
+      # n8n must know its own public address, or its chat window posts to the wrong port
+      WEBHOOK_URL: ${N8N_PUBLIC_URL:-http://localhost:5679/}
+      N8N_SECURE_COOKIE: "false"          # plain http on localhost
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      GENERIC_TIMEZONE: Asia/Kolkata
+      TZ: Asia/Kolkata
+    extra_hosts: ["host.docker.internal:host-gateway"]   # reach Ollama on the host (Linux needs this line)
+    volumes: [n8ndata:/home/node/.n8n]
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:5678/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  app:
+    build: .
+    ports: ["127.0.0.1:${APP_HOST_PORT:-8501}:8501"]
+    environment:
+      APP_HOST: 0.0.0.0
+      N8N_URL: http://n8n:5678
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${COMPOSE_DB_PASSWORD:-shopassist}
+      POSTGRES_SSL: disable
+      ADMIN_KEY: ${ADMIN_KEY:-}
+    depends_on:
+      postgres: {condition: service_healthy}
+      n8n: {condition: service_started}
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:0.6.8
+    profiles: [ollama]
+    ports: ["127.0.0.1:11434:11434"]
+    volumes: [ollama:/root/.ollama]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  n8ndata:
+  ollama:
