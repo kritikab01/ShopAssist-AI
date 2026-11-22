@@ -452,39 +452,10 @@ def wf03():
 
     # Small local models follow an explicit note far better than a long system prompt. This step spots clear
     # signals (anger / wants a human, refund, out-of-scope) and adds a short instruction to the message.
+    # Rules live in prompts/detect_intent.js (anger, sarcasm, Hindi/Hinglish, refunds, stock, identity check);
+    # tests/test_guardrails.py runs that exact file with Node.
     guard = wf.node("Detect Intent (rules)", "n8n-nodes-base.code", 2, (180, 0), {
-        "jsCode": (
-            "// Rule-based pre-check: adds a NOTE for the agent when the message clearly needs a special action.\n"
-            "const msg = String($json.chatInput || '');\n"
-            "const m = msg.toLowerCase();\n"
-            "const notes = [];\n"
-            "if (/manager|human|real person|complain|worst|third time|angry|furious|ridiculous|fed up|cheat|fraud/.test(m))\n"
-            "  notes.push('The customer is upset or asks for a human: look up the order if an order ID is given, then you MUST call escalate_to_human and give the ticket ID.');\n"
-            "if (/refund/.test(m) && /ut\\d{4}/.test(m))\n"
-            "  notes.push('Refund request: call order_lookup; if the order amount is more than Rs 5000 you MUST call escalate_to_human (you cannot approve it) and give the ticket ID.');\n"
-            "if (/\\b(stock|in stock|available|availability|restock|reorder|purchase order|inventory|low stock)\\b/.test(m) && !/stock market/.test(m))\n"
-            "  notes.push('This is about stock or purchase orders: call inventory_expert with the full question and pass its answer on. Do not guess availability.');\n"
-            "if (/return|exchange|does not fit|doesn't fit|too (small|big|tight|loose)|wrong size/.test(m) && /ut\\d{4}/.test(m))\n"
-            "  notes.push('Return question about an order: call order_lookup for the order AND faq_knowledge for the return and refund policy, then answer with both (no stock check needed).');\n"
-            "if (/diwali|discount|coupon|promo|offer|sale|code|gift card|loyalty/.test(m) && !/python|javascript|script|program/.test(m))\n"
-            "  notes.push('Offers and coupon codes: call website_knowledge first and give ONLY codes that appear in its result. Never invent a code.');\n"
-            "if (/python|javascript|java |code|script|program|homework|essay|poem|recipe|weather|cricket|movie|stock market|bitcoin/.test(m)\n"
-            "    && !/order|ut\\d{4}|return|refund|size|deliver|kurta|shirt|jeans|hoodie|in stock|restock|low stock/.test(m))\n"
-            "  notes.push('This is NOT about UrbanThread. Do not answer it and do not write code: reply that you can only help with UrbanThread orders, returns, sizes, delivery, offers and stock.');\n"
-            "// Flags for the 'guaranteed escalation' step after the agent.\n"
-            "const oid = (msg.toUpperCase().match(/UT\\d{4}/) || [''])[0];\n"
-            "const phone = (msg.replace(/[\\s-]/g, '').match(/(\\+?91)?[6-9]\\d{9}/) || [''])[0];\n"
-            "// Identity check: last 4 digits of the phone on the order (from a full number, 'ending 0003', or 4 digits alone).\n"
-            "const noOid = msg.replace(/UT\\d{4}/gi, ' ');\n"
-            "const last4 = phone ? phone.slice(-4) : ((noOid.match(/(?:^|\\D)(\\d{4})(?!\\d)/) || ['', ''])[1]);\n"
-            "if (oid && last4) notes.push(`Call order_lookup with order_id ${oid} and phone_last4 ${last4}.`);\n"
-            "else if (oid) notes.push(`Call order_lookup with order_id ${oid} and an empty phone_last4; it will tell you to ask for the last 4 digits of the phone number. Never share order details before they are verified.`);\n"
-            "else if (last4 && /^\\D*\\d{4}\\D*$/.test(msg.trim())) notes.push(`The customer sent 4 digits (${last4}): these are the last 4 digits of their phone for the order ID mentioned earlier in this chat. Call order_lookup with that order ID and phone_last4 ${last4}.`);\n"
-            "const name = (msg.match(/\\b(?:i am|i'm|my name is|this is)\\s+([A-Z][a-z]+)/) || ['', ''])[1];\n"
-            "const flags = { escalate: /manager|human|real person|complain|worst|third time|angry|furious|ridiculous|fed up|cheat|fraud/.test(m),\n"
-            "  refund: /refund/.test(m), order_id: oid, phone, last4, name, original: msg };\n"
-            "return [{ json: { ...$json, intent: flags, chatInput: notes.length ? msg + '\\n\\n[NOTE FOR ASSISTANT: ' + notes.join(' ') + ']' : msg } }];\n"
-        ),
+        "jsCode": (ROOT / "prompts" / "detect_intent.js").read_text(encoding="utf-8"),
     })
     wf.link(chat, guard)
     wf.link(guard, agent)
@@ -519,7 +490,7 @@ def wf03():
             "const bigRefund = intent.refund && Number(order.amount_inr || 0) > 5000;\n"
             "const needs = (intent.escalate || bigRefund) && !/TKT-\\d+/.test(reply);\n"
             "const reason = intent.escalate ? 'Customer is upset or asked for a human' : 'Refund above Rs 5,000 needs human approval';\n"
-            "return [{ json: { needs_ticket: needs, reply,\n"
+            "return [{ json: { needs_ticket: needs, reply, language: intent.language || 'en',\n"
             "  customer_name: intent.name || order.customer_name || 'Unknown',\n"
             "  phone: intent.phone || order.phone || '',\n"
             "  order_id: intent.order_id || '',\n"
@@ -554,8 +525,11 @@ def wf03():
     })
     with_ticket = wf.node("Reply + Ticket ID", "n8n-nodes-base.set", 3.4, (1600, -320), {
         "assignments": {"assignments": [{"id": "o1", "name": "output", "type": "string", "value": (
-            "={{ $('Needs a Ticket? (rules)').item.json.reply }}\n\nI have passed this to our human support "
-            "team. Your ticket ID is {{ $json.ticket_id }} - a team member will contact you within 4 business hours."
+            "={{ $('Needs a Ticket? (rules)').item.json.reply }}\n\n{{ {"
+            "hinglish: 'Maine aapki problem hamari support team ko bhej di hai. Aapka ticket ID ' + $json.ticket_id + ' hai - 4 business hours mein team aapse contact karegi.', "
+            "hi: 'मैंने आपकी समस्या हमारी सपोर्ट टीम को भेज दी है। आपका टिकट ID ' + $json.ticket_id + ' है - 4 कार्य घंटों में टीम आपसे संपर्क करेगी।'"
+            "}[$('Needs a Ticket? (rules)').item.json.language] || 'I have passed this to our human support team. Your ticket ID is ' + "
+            "$json.ticket_id + ' - a team member will contact you within 4 business hours.' }}"
         )}]},
         "options": {},
     })
@@ -642,7 +616,9 @@ def wf04():
             "if (/^[0-9]{10}$/.test(phone)) phone = '+91' + phone;  // Indian 10-digit number -> E.164\n"
             "const oid = (String(t.order_id || '') + ' ' + String(inp.order_id || '') + ' ' + text).toUpperCase().match(/UT\\d{4}/);\n"
             "const issueGuess = text.includes('refund') ? 'refund' : text.includes('late') || text.includes('delay') ? 'delivery' : 'other';\n"
-            "const angry = /angry|manager|worst|third time|furious|complain/.test(text);\n"
+            "const angry = /angry|manager|worst|third time|furious|complain|sarcas|upset|bakwas|ghatiya/.test(text);\n"
+            "const raw = String(inp.reason || '') + ' ' + String(inp.conversation_summary || '');\n"
+            "const language = /[\\u0900-\\u097F]/.test(raw) ? 'hi' : /\\b(kya|hai|mera|kab|nahi|aayega|chahiye|wapas|karo|bhai)\\b/i.test(raw) ? 'hinglish' : 'en';\n"
             "return [{ json: { output: {\n"
             "  customer_name: String(t.customer_name || inp.customer_name || 'Unknown').slice(0, 100),\n"
             "  phone: phone.slice(0, 20),\n"
@@ -652,6 +628,7 @@ def wf04():
             "  priority: pick(t.priority, ['low', 'medium', 'high'], 'high'),\n"
             "  summary: String(t.summary || inp.conversation_summary || inp.reason || '').slice(0, 2000),\n"
             "  suggested_action: String(t.suggested_action || 'Contact the customer and review the chat.').slice(0, 1000),\n"
+            "  language,\n"
             "} } }];\n"
         ),
     })
@@ -660,14 +637,14 @@ def wf04():
         "operation": "executeQuery",
         "query": (
             "INSERT INTO tickets (customer_name, phone, order_id, issue_type, sentiment, priority,\n"
-            "                     summary, suggested_action)\n"
-            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n"
+            "                     summary, suggested_action, language)\n"
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n"
             "RETURNING ticket_id, priority, created_at;"
         ),
         "options": {"queryReplacement": (
             "={{ [ $json.output.customer_name, $json.output.phone, $json.output.order_id, "
             "$json.output.issue_type, $json.output.sentiment, $json.output.priority, "
-            "$json.output.summary, $json.output.suggested_action ] }}"
+            "$json.output.summary, $json.output.suggested_action, $json.output.language ] }}"
         )},
     }, ["postgres"])
     slack = wf.node("Alert Slack #support-escalations", "n8n-nodes-base.slack", 2.3, (880, 0), {
