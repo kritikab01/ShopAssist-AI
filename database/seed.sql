@@ -32,3 +32,21 @@ INSERT INTO products (sku, name, category, size, price_inr, stock, reorder_level
 ('SHR-OXF-L', 'Oxford Shirt',            'Shirts',   'L', 1499.00, 22, 10, 'Bengaluru Shirts', '+919000000105', 610.00),
 ('PLZ-COT-S', 'Cotton Palazzo',          'Bottoms',  'S',  799.00,  4, 8,  'Jaipur Handloom',  '+919000000102', 300.00)
 ON CONFLICT (sku) DO NOTHING;
+
+-- Status history for the fake orders (only added once).
+INSERT INTO order_events (order_id, status, note, created_at)
+SELECT v.order_id, v.status, v.note, v.ts::timestamptz FROM (VALUES
+  ('UT1001','placed','Order placed (UPI)','2026-09-20 10:12'),('UT1001','shipped','Handed to BlueDart','2026-09-21 18:40'),
+  ('UT1001','delivered','Delivered in Bengaluru','2026-09-23 13:05'),
+  ('UT1002','placed','Order placed (Card)','2026-10-04 09:30'),('UT1002','shipped','Handed to Delhivery','2026-10-06 17:15'),
+  ('UT1003','placed','Order placed (COD)','2026-10-01 20:02'),('UT1003','shipped','Handed to Ekart','2026-10-03 11:20'),
+  ('UT1003','delayed','Ekart: festive-season backlog at Lucknow hub','2026-10-09 08:00'),
+  ('UT1004','placed','Order placed (Card)','2026-09-25 15:45'),('UT1004','delivered','Delivered in Chennai','2026-09-28 12:10'),
+  ('UT1005','placed','Order placed (NetBanking)','2026-10-07 11:00'),('UT1005','out_for_delivery','Out for delivery in Delhi','2026-10-10 08:30'),
+  ('UT1006','placed','Order placed (COD)','2026-10-09 19:20'),
+  ('UT1007','placed','Order placed (UPI)','2026-10-08 22:10'),('UT1007','packed','Packed at Bengaluru warehouse','2026-10-09 10:00'),
+  ('UT1008','delivered','Delivered in Hyderabad','2026-09-18 16:00'),('UT1008','returned','Return picked up (size issue)','2026-09-24 11:30'),
+  ('UT1009','cancelled','Cancelled by customer before dispatch','2026-10-02 21:00'),
+  ('UT1010','placed','Order placed (UPI)','2026-10-06 14:25'),('UT1010','shipped','Handed to Ekart','2026-10-08 09:50')
+) AS v(order_id, status, note, ts)
+WHERE NOT EXISTS (SELECT 1 FROM order_events);

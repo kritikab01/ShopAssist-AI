@@ -15,7 +15,7 @@ except RuntimeError as e:
     raise SystemExit(f"Cannot start the chat: {e}")
 
 session = f"cli-{uuid.uuid4().hex[:8]}"
-print("ShopAssist (UrbanThread) - type a question or one word: UT1002, returns, diwali, stock, kurta, human")
+print("ShopAssist (UrbanThread) - type a question or one word: UT1002 (then the phone's last 4 digits, 0002), returns, diwali, stock, kurta, human")
 print("Commands: /new = new conversation, /quit = exit. The first answer can take up to a minute.\n")
 while True:
     try:

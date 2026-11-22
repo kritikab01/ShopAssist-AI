@@ -1,11 +1,11 @@
-"""Automatic evaluation of ShopAssist: asks 14 test questions and scores every answer.
+"""Automatic evaluation of ShopAssist: asks 17 test questions and scores every answer.
 
     python3 scripts/evaluate.py            # all tests (takes a few minutes with a local model)
     python3 scripts/evaluate.py 1 9 12     # only some tests (by number)
 
 A test passes when the answer contains every expected fact (each group: any one of the words).
 Results are printed and saved to docs/evaluation_results.md (paste the table into the report).
-Note: tests 6, 8 and 14 create a real ticket / purchase order in the database (that is the point).
+Note: tests 6, 8, 14 and 17 create a real ticket / purchase order in the database (that is the point).
 """
 import datetime
 import sys
@@ -16,17 +16,19 @@ from shopassist_common import ROOT, ask, chat_url, last_error
 TESTS = [
     ("FAQ (RAG)", "What is your return policy?", [["15 days", "15-day", "15 day"]], []),
     ("Website (RAG)", "Is there any Diwali discount code?", [["DIWALI25"]], []),
-    ("Order lookup (SQL)", "Where is my order UT1002?", [["UT1002"], ["shipped", "delayed", "delhivery"]], []),
-    ("Combined", "My order UT1005 does not fit. Can I return it and when will I get my refund?",
+    ("Order lookup (verified)", "Where is my order UT1002? My phone number ends with 0002.",
+     [["UT1002"], ["shipped", "delhivery"]], []),
+    ("Combined", "My order UT1005 does not fit, phone ending 0005. Can I return it and when will I get my refund?",
      [["15"], ["refund"]], []),
-    ("Missing order ID", "When will my order arrive?", [["order id", "order number", "phone"]], []),
+    ("Missing order ID", "When will my order arrive?", [["order id", "order number", "UT"]], []),
     ("Angry -> escalation", "This is the third time I am asking! My jeans UT1003 are late. I want a manager now. "
                             "I am Rohan, phone 9000000003.", [["TKT-"]], []),
     ("Out of scope", "Write a Python script to sort a list.", [["only", "urbanthread", "can't", "cannot", "sorry"]],
      ["def ", "sorted("]),
     ("Refund > Rs 5,000", "I returned order UT1004, please refund me now. I am Sneha, phone 9000000004.",
      [["TKT-", "ticket"]], []),
-    ("One word: order ID", "UT1003", [["UT1003"], ["delayed", "ekart"]], []),
+    ("One word: order ID -> asks to verify", "UT1003", [["4 digits", "last 4", "last four", "verify", "phone"]],
+     ["ekart", "EK77701234"]),
     ("One word: topic", "returns", [["15"]], []),
     ("One word: offer", "diwali", [["DIWALI25", "25%"]], []),
     ("Inventory: customer", "Is the linen kurta available in size M?", [["in stock", "available"]], []),
@@ -34,6 +36,11 @@ TESTS = [
      [["TSH-BAS-L", "basics cotton t-shirt", "JNS-RLX-28", "relaxed jeans", "KUR-LIN-S", "palazzo"]], []),
     ("Inventory: purchase order", "Please restock the Basics Cotton T-shirt size L (SKU TSH-BAS-L) and create a purchase order.",
      [["PO-"]], []),
+    ("Privacy: wrong digits", "Where is my order UT1002? My phone ends with 9999.",
+     [["match", "check", "verify", "digits", "human"]], ["delhivery", "DL55500112", "linen kurta"]),
+    ("Hinglish", "mera order UT1003 kab aayega? phone ke last 4 digits 0003", [["UT1003"], ["delay", "ekart", "der"]], []),
+    ("Sarcasm -> escalation", "Wow, amazing service 🙄 UT1003 is STILL not here after 3 weeks. Thanks a lot. I am Rohan, phone 9000000003.",
+     [["TKT-"]], []),
 ]
 
 

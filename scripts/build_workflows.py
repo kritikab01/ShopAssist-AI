@@ -38,6 +38,46 @@ TWILIO_FROM = "+10000000000"  # placeholder: replace with your Twilio phone numb
 SUPPORT_EMAIL = "support@urbanthread.example"  # placeholder: replace with your own inbox
 SENDER_EMAIL = "your.gmail@gmail.com"  # placeholder: the Gmail account used in SMTP credential
 
+# Identity check for order_lookup: an order is only shown when the customer gives the order ID AND the last 4 digits
+# of the phone number on that order. Every check is logged in verification_attempts; 5 wrong tries in 15 minutes
+# lock the order for the chat (4 digits = 10,000 combinations, so guessing is stopped long before it can work).
+# The result always has a 'verification' and an 'instruction' column, which tells the model exactly what to do.
+# (Tested in tests/test_sql.py against a real Postgres.)
+ORDER_LOOKUP_SQL = (
+    "-- $1 = order ID, $2 = last 4 digits of the phone number on the order\n"
+    "WITH input AS (\n"
+    "  SELECT UPPER(TRIM(COALESCE($1, ''))) AS oid,\n"
+    "         RIGHT(REGEXP_REPLACE(COALESCE($2, ''), '[^0-9]', '', 'g'), 4) AS last4\n"
+    "), o AS (\n"
+    "  SELECT orders.* FROM orders, input WHERE orders.order_id = input.oid\n"
+    "), fails AS (\n"
+    "  SELECT count(*) AS n FROM verification_attempts v, input\n"
+    "  WHERE v.order_id = input.oid AND NOT v.success AND v.created_at > now() - interval '15 minutes'\n"
+    "), chk AS (\n"
+    "  SELECT CASE\n"
+    "    WHEN NOT EXISTS (SELECT 1 FROM o) THEN 'not_found'\n"
+    "    WHEN (SELECT n FROM fails) >= 5 THEN 'locked'\n"
+    "    WHEN length((SELECT last4 FROM input)) < 4 THEN 'need_phone'\n"
+    "    WHEN (SELECT RIGHT(phone, 4) FROM o) = (SELECT last4 FROM input) THEN 'verified'\n"
+    "    ELSE 'wrong_phone' END AS result\n"
+    "), log AS (\n"
+    "  INSERT INTO verification_attempts (order_id, success)\n"
+    "  SELECT (SELECT oid FROM input), result = 'verified' FROM chk WHERE result IN ('verified', 'wrong_phone')\n"
+    ")\n"
+    "SELECT chk.result AS verification,\n"
+    "  CASE chk.result\n"
+    "    WHEN 'verified' THEN 'Identity verified. Share these order details with the customer.'\n"
+    "    WHEN 'need_phone' THEN 'Do NOT share any order details. Ask the customer for the last 4 digits of the phone number used for this order.'\n"
+    "    WHEN 'wrong_phone' THEN 'The digits do not match this order. Do NOT share any order details. Ask the customer to check the number, or offer a human agent.'\n"
+    "    WHEN 'locked' THEN 'Too many wrong attempts for this order. Do NOT share any details. Offer to connect the customer with a human (escalate_to_human).'\n"
+    "    ELSE 'No order with this ID. Ask the customer to check the order ID (format UT followed by 4 digits).' END AS instruction,\n"
+    "  o.order_id, o.customer_name, o.items, o.amount_inr, o.payment_method, o.status, o.city,\n"
+    "  o.order_date::text AS order_date, o.expected_delivery::text AS expected_delivery, o.courier, o.tracking_no,\n"
+    "  (SELECT string_agg(e.status || ' (' || to_char(e.created_at, 'DD Mon') || ')', ' -> ' ORDER BY e.created_at)\n"
+    "     FROM order_events e WHERE e.order_id = o.order_id) AS history\n"
+    "FROM chk LEFT JOIN o ON chk.result = 'verified';"
+)
+
 
 # ---------------------------------------------------------------- helpers
 class WF:
@@ -367,24 +407,16 @@ def wf03():
     orders = wf.node("order_lookup", "n8n-nodes-base.postgresTool", 2.5, (860, 300), {
         "descriptionType": "manual",
         "toolDescription": (
-            "Look up a customer's order in the database. Input: exactly ONE order ID (like UT1003) "
-            "or ONE phone number (like +919000000003 or 9000000003). Returns status, items, amount in Rs, "
-            "payment method, expected delivery date, courier and tracking number."
+            "Look up a customer's order. Inputs: order_id (like UT1003) and phone_last4 (the last 4 digits of "
+            "the phone number on the order, or empty if the customer has not given them). Order details are "
+            "only returned when the digits match; otherwise follow the 'instruction' field of the result."
         ),
         "operation": "executeQuery",
-        "query": (
-            "-- $1 = order ID or phone number provided by the customer\n"
-            "SELECT order_id, customer_name, items, amount_inr, payment_method, status, city,\n"
-            "       order_date::text AS order_date, expected_delivery::text AS expected_delivery, courier, tracking_no\n"
-            "FROM orders\n"
-            "WHERE order_id = UPPER(TRIM($1))\n"
-            "   OR RIGHT(phone, 10) = RIGHT(REGEXP_REPLACE($1, '[^0-9]', '', 'g'), 10)\n"
-            "LIMIT 5;"
-        ),
+        "query": ORDER_LOOKUP_SQL,
         "options": {
             "queryReplacement": (
-                "={{ $fromAI('order_id_or_phone', 'The order ID (e.g. UT1003) or phone number "
-                "given by the customer', 'string') }}"
+                "={{ [ $fromAI('order_id', 'The order ID given by the customer, e.g. UT1003', 'string', ''), "
+                "$fromAI('phone_last4', 'Last 4 digits of the phone number on the order, or empty string', 'string', '') ] }}"
             ),
         },
     }, ["postgres"])
@@ -437,9 +469,15 @@ def wf03():
             "// Flags for the 'guaranteed escalation' step after the agent.\n"
             "const oid = (msg.toUpperCase().match(/UT\\d{4}/) || [''])[0];\n"
             "const phone = (msg.replace(/[\\s-]/g, '').match(/(\\+?91)?[6-9]\\d{9}/) || [''])[0];\n"
+            "// Identity check: last 4 digits of the phone on the order (from a full number, 'ending 0003', or 4 digits alone).\n"
+            "const noOid = msg.replace(/UT\\d{4}/gi, ' ');\n"
+            "const last4 = phone ? phone.slice(-4) : ((noOid.match(/(?:^|\\D)(\\d{4})(?!\\d)/) || ['', ''])[1]);\n"
+            "if (oid && last4) notes.push(`Call order_lookup with order_id ${oid} and phone_last4 ${last4}.`);\n"
+            "else if (oid) notes.push(`Call order_lookup with order_id ${oid} and an empty phone_last4; it will tell you to ask for the last 4 digits of the phone number. Never share order details before they are verified.`);\n"
+            "else if (last4 && /^\\D*\\d{4}\\D*$/.test(msg.trim())) notes.push(`The customer sent 4 digits (${last4}): these are the last 4 digits of their phone for the order ID mentioned earlier in this chat. Call order_lookup with that order ID and phone_last4 ${last4}.`);\n"
             "const name = (msg.match(/\\b(?:i am|i'm|my name is|this is)\\s+([A-Z][a-z]+)/) || ['', ''])[1];\n"
             "const flags = { escalate: /manager|human|real person|complain|worst|third time|angry|furious|ridiculous|fed up|cheat|fraud/.test(m),\n"
-            "  refund: /refund/.test(m), order_id: oid, phone, name, original: msg };\n"
+            "  refund: /refund/.test(m), order_id: oid, phone, last4, name, original: msg };\n"
             "return [{ json: { ...$json, intent: flags, chatInput: notes.length ? msg + '\\n\\n[NOTE FOR ASSISTANT: ' + notes.join(' ') + ']' : msg } }];\n"
         ),
     })
@@ -453,11 +491,13 @@ def wf03():
     amount = wf.node("Order Details (for escalation check)", "n8n-nodes-base.postgres", 2.5, (720, -220), {
         "operation": "executeQuery",
         "query": (
-            "SELECT order_id, customer_name, phone, amount_inr, items, status, expected_delivery::text AS expected_delivery, courier, tracking_no\n"
+            "-- internal check only (amount for the refund rule); details are shown only if verified = true\n"
+            "SELECT order_id, customer_name, phone, amount_inr, items, status, expected_delivery::text AS expected_delivery, courier, tracking_no,\n"
+            "       (length($2) = 4 AND RIGHT(phone, 4) = $2) AS verified\n"
             "FROM orders\n"
             "WHERE order_id = UPPER(TRIM($1)) LIMIT 1;"
         ),
-        "options": {"queryReplacement": "={{ [ " + INTENT + ".order_id || 'none' ] }}"},
+        "options": {"queryReplacement": "={{ [ " + INTENT + ".order_id || 'none', " + INTENT + ".last4 || '' ] }}"},
     }, ["postgres"], alwaysOutputData=True, onError="continueRegularOutput")
     decide = wf.node("Needs a Ticket? (rules)", "n8n-nodes-base.code", 2, (940, -220), {
         "jsCode": (
@@ -466,7 +506,7 @@ def wf03():
             "const order = $json.order_id ? $json : {};\n"
             "let reply = String($('ShopAssist AI Agent').first().json.output || '').trim();\n"
             "if (!reply) {  // the AI step failed (e.g. bad tool call): answer from the database / rules instead\n"
-            "  const r = order.order_id ? $('Order Details (for escalation check)').first().json : null;\n"
+            "  const r = order.order_id && order.verified ? order : null;  // never show details without the phone check\n"
             "  reply = r ? `Your order ${r.order_id} (${r.items}) is ${String(r.status).replace(/_/g, ' ')}. Expected delivery: ${String(r.expected_delivery).slice(0, 10)}, courier ${r.courier}, tracking ${r.tracking_no}.`\n"
             "    : (intent.escalate || intent.refund) ? 'I am sorry for the trouble. Let me connect you with our support team.'\n"
             "    : 'Sorry, I could not process that just now. Please share your order ID (like UT1003) or ask about returns, sizes, delivery, offers or stock.';\n"
