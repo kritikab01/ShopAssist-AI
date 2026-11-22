@@ -13,7 +13,6 @@ Then it prints a short "what to do" list. Paste the whole output into the chat i
 """
 import datetime
 import json
-import os
 import socket
 import subprocess
 import urllib.error

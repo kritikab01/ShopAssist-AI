@@ -143,7 +143,7 @@ class WF:
         }
         path = OUT_DIR / filename
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        print("wrote", path.relative_to(ROOT))
+        print("wrote", path.relative_to(ROOT) if path.is_relative_to(ROOT) else path)
 
 
 def rl(value, mode="list"):

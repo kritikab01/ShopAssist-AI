@@ -35,7 +35,7 @@ c = c[0] if isinstance(c, list) and c else {}
 conv, tickets = int(c.get("conversations") or 0), int(t.get("tickets") or 0)
 rate = f"{(1 - tickets / conv) * 100:.0f}%" if conv else "n/a"
 
-md = [f"# ShopAssist KPI report\n", f"Generated {datetime.datetime.now():%d %b %Y %H:%M} from the live database.\n",
+md = ["# ShopAssist KPI report\n", f"Generated {datetime.datetime.now():%d %b %Y %H:%M} from the live database.\n",
       "## Headline numbers\n",
       f"- Conversations handled by the AI: **{conv}** ({c.get('customer_messages') or 0} customer messages)",
       f"- Escalated to a human (tickets): **{tickets}** ({t.get('high_priority') or 0} high priority, "

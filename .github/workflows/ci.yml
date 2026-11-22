@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: Lint, workflow checks, guardrails, SQL on Postgres 16
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install test tools
+        run: pip install pytest ruff pg8000
+      - name: Lint (ruff)
+        run: ruff check scripts app tests
+      - name: Generated workflows are up to date
+        run: |
+          python scripts/build_workflows.py
+          git diff --exit-code workflows/ || (echo "::error::Run python3 scripts/build_workflows.py and commit workflows/" && exit 1)
+      - name: Tests (workflow structure, guardrails with Node, every SQL query on Postgres)
+        run: pytest -v
+      - name: Docker Compose file is valid
+        if: hashFiles('docker-compose.yml') != ''
+        run: docker compose -f docker-compose.yml config --quiet

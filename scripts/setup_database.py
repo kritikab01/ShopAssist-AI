@@ -13,7 +13,7 @@ from shopassist_common import ROOT, db
 
 
 def statements(path):
-    sql = "\n".join(l for l in path.read_text(encoding="utf-8").splitlines() if not l.strip().startswith("--"))
+    sql = "\n".join(line for line in path.read_text(encoding="utf-8").splitlines() if not line.strip().startswith("--"))
     return [s.strip() for s in re.split(r";\s*(?:\n|$)", sql) if s.strip()]
 
 
