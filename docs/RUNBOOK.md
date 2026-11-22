@@ -79,6 +79,14 @@ Then workflow 03 -> double-click *Public Chat (UrbanThread)*: the Chat URL now s
 (The terminal tools and the web app in steps 6–7 work without this fix.)
 
 ## 10. Part B (optional) – real notifications
-Replace the placeholder Slack / Twilio / SMTP credentials in n8n with real ones, set the Twilio *From*
-number (04, 05) and e-mail addresses (04), then publish 04, 05, 06 and 07 again. For approval links that work from your phone, set N8N_PUBLIC_URL in .env
+Fill in the real values in `.env`, then run `python3 scripts/import_to_n8n.py --publish` again. Each channel
+switches on only when all its values are real (not the `.env.example` placeholders); the script prints
+`Part B ... off - set real X` for the ones still missing:
+- **Slack:** `SLACK_BOT_TOKEN`, `SLACK_CHANNEL` (invite the bot to that channel: `/invite @your-bot`)
+- **Twilio:** `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` (your Twilio number) and
+  `TWILIO_TEST_TO_NUMBER` (your verified phone – every SMS goes there, never to the seed customers)
+- **E-mail:** `SMTP_USER` (the Gmail address), `SMTP_APP_PASSWORD` (a Gmail app password), `SUPPORT_EMAIL`
+
+The script replaces the placeholder credentials with real ones (tested where n8n allows) and sets the
+sender / recipient on the notification nodes in 04, 05, 06 and 07. For approval links that work from your phone, set N8N_PUBLIC_URL in .env
 and run `python3 scripts/import_to_n8n.py --publish` again.

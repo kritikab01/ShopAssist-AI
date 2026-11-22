@@ -171,6 +171,69 @@ for ctype, data in PLACEHOLDERS.items():
             print(f"created  placeholder credential for {ctype}")
         except ApiError as e:
             print(f"note: could not create a placeholder {ctype} credential ({e})")
+
+
+# Part B: real Slack / Twilio / SMTP from .env. A channel switches on only when ALL its values are real
+# (not the .env.example placeholders). Its placeholder credential is then replaced by a real one, and the
+# nodes get the real sender / recipient below. Values are never printed.
+def real(var):
+    v = os.environ.get(var, "")
+    bad = ("REPLACE", "XXXX", "placeholder", "example", "your.", "+10000000000")
+    return v if v and not any(b.lower() in v.lower() for b in bad) else ""
+
+
+PART_B = {
+    "slackApi": ("Slack (from .env)", ["SLACK_BOT_TOKEN"],
+                 lambda: {"accessToken": real("SLACK_BOT_TOKEN")}),
+    "twilioApi": ("Twilio (from .env)", ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER",
+                                                 "TWILIO_TEST_TO_NUMBER"],
+                  lambda: {"authType": "authToken", "accountSid": real("TWILIO_ACCOUNT_SID"),
+                           "authToken": real("TWILIO_AUTH_TOKEN")}),
+    "smtp": ("SMTP (from .env)", ["SMTP_USER", "SMTP_APP_PASSWORD", "SUPPORT_EMAIL"],
+             lambda: {"user": real("SMTP_USER"), "password": real("SMTP_APP_PASSWORD"),
+                      "host": os.environ.get("SMTP_HOST") or "smtp.gmail.com",
+                      "port": int(os.environ.get("SMTP_PORT") or 465),
+                      "secure": (os.environ.get("SMTP_SSL") or "true").lower() not in ("false", "0", "no")}),
+}
+swap = {}  # placeholder credential id -> real credential (nodes that used the placeholder move over)
+part_b_on = set()
+for ctype, (cname, needs, data) in PART_B.items():
+    missing = [v for v in needs if not real(v)]
+    if missing:
+        print(f"Part B   {ctype}: off - set real {', '.join(missing)} in .env")
+        continue
+    part_b_on.add(ctype)
+    mine = [c for c in by_type.get(ctype, []) if c["name"] == cname]
+    try:
+        if mine:  # refresh it from .env (delete + create: the public API cannot edit secrets in place)
+            api("DELETE", f"/credentials/{mine[0]['id']}")
+            by_type[ctype].remove(mine[0])
+        old_ids = [c["id"] for c in by_type.get(ctype, []) if "placeholder" in c["name"]] + [c["id"] for c in mine]
+        new = {"id": create_credential(cname, ctype, data()), "name": cname}
+        for c in list(by_type[ctype]):
+            if "placeholder" in c["name"]:
+                api("DELETE", f"/credentials/{c['id']}")
+                by_type[ctype].remove(c)
+        for oid in old_ids:
+            swap[oid] = new
+        ok = credential_ok(new["id"])
+        print(f"Part B   {ctype}: real credential '{cname}' from .env" +
+              {True: " - tested OK", False: " - n8n test FAILED, check the values", None: ""}[ok])
+    except ApiError as e:
+        print(f"Part B   {ctype}: could not create the real credential ({e})")
+        part_b_on.discard(ctype)
+
+
+def apply_part_b(node):
+    """Real sender / recipient on notification nodes (only for channels switched on above)."""
+    t, p = node["type"].split(".")[-1], node["parameters"]
+    if t == "slack" and "slackApi" in part_b_on and real("SLACK_CHANNEL") and isinstance(p.get("channelId"), dict):
+        p["channelId"]["value"] = real("SLACK_CHANNEL")
+    if t == "twilio" and "twilioApi" in part_b_on:
+        p["from"] = real("TWILIO_FROM_NUMBER")
+        p["to"] = real("TWILIO_TEST_TO_NUMBER")  # demo safety: every SMS goes to YOUR verified phone, not seed customers
+    if t == "emailSend" and "smtp" in part_b_on:
+        p["fromEmail"], p["toEmail"] = real("SMTP_USER"), real("SUPPORT_EMAIL")
 auto = {t: cs[0] for t, cs in by_type.items() if len(cs) == 1}
 for t, cs in by_type.items():
     if len(cs) > 1:
@@ -183,8 +246,10 @@ for filename in ORDER:
     old_creds = {n["name"]: n["credentials"] for n in (old or {}).get("nodes", []) if n.get("credentials")}
     for node in wf["nodes"]:
         node.pop("credentials", None)  # file placeholders point at credentials that do not exist
+        apply_part_b(node)
         if node["name"] in old_creds:
-            node["credentials"] = old_creds[node["name"]]  # keep what you already selected
+            node["credentials"] = {t: swap.get(c.get("id"), c)
+                                   for t, c in old_creds[node["name"]].items()}  # keep yours (placeholder -> real)
         elif NEEDS.get(node["type"].split(".")[-1]) in auto:
             ctype = NEEDS[node["type"].split(".")[-1]]
             node["credentials"] = {ctype: auto[ctype]}  # your only credential of this type

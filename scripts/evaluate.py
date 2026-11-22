@@ -119,7 +119,9 @@ def judge(question, expected, answer):
             "response_format": {"type": "json_object"}, "messages": [{"role": "user", "content": prompt}]},
             {"Authorization": f"Bearer {ENV.get('GROQ_API_KEY', '')}"}, timeout=60)
         return parse_judge(r["choices"][0]["message"]["content"]) if st == 200 else None
-    for model in (ENV.get("JUDGE_MODEL") or "qwen2.5:7b", ENV.get("CHAT_MODEL") or "qwen2.5:3b"):
+    # A 3B judge grades badly (flags correct answers as invented), so prefer any bigger local model first.
+    models = [ENV["JUDGE_MODEL"]] if ENV.get("JUDGE_MODEL") else ["qwen2.5:7b", "qwen2.5:14b"]
+    for model in models + [ENV.get("CHAT_MODEL") or "qwen2.5:3b"]:
         st, r, _ = http("POST", f"{OLLAMA}/api/chat", {
             "model": model, "stream": False, "format": "json", "think": False,
             "options": {"temperature": 0, "num_ctx": 4096}, "messages": [{"role": "user", "content": prompt}]},

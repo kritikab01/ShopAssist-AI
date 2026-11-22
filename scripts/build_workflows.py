@@ -169,7 +169,10 @@ def ollama_chat(wf, name, pos, temperature=0.2, json_mode=False):
         return wf.node(name.replace("Ollama", "Groq"), "@n8n/n8n-nodes-langchain.lmChatGroq", 1, pos,
                        {"model": CLOUD["chat_model"], "options": {"temperature": temperature}}, ["groqApi"])
     options = {"temperature": temperature, "numCtx": NUM_CTX,
-               "think": False}  # qwen2.5 is not a "thinking" model; n8n's default (true) can be rejected
+               "think": False,  # qwen2.5 is not a "thinking" model; n8n's default (true) can be rejected
+               # Cap each reply: a 3B model sometimes loops (e.g. Hinglish, combined questions) until the
+               # 240 s workflow timeout kills the chat. 700 tokens is far more than any answer or tool call.
+               "numPredict": 700, "repeatPenalty": 1.1}
     if json_mode:
         options["format"] = "json"  # forces valid JSON output (used for the structured ticket)
     return wf.node(name, "@n8n/n8n-nodes-langchain.lmChatOllama", 1, pos,
@@ -414,7 +417,8 @@ def wf03():
     agent = wf.node("ShopAssist AI Agent", "@n8n/n8n-nodes-langchain.agent", 1.7, (360, 0), {
         "agent": "toolsAgent",
         "promptType": "auto",
-        "options": {"systemMessage": "=" + system_prompt, "maxIterations": 8},
+        "options": {"systemMessage": "=" + system_prompt, "maxIterations": 8,
+                    "returnIntermediateSteps": True},  # lets 'Needs a Ticket?' see if escalate_to_human ran
     }, onError="continueRegularOutput")  # if the model fails, the steps after it still send a useful reply
     llm = ollama_chat(wf, "Ollama Chat Model", (0, 300))
     mem = wf.node("Postgres Chat Memory", "@n8n/n8n-nodes-langchain.memoryPostgresChat", 1.3, (180, 300), {
@@ -525,7 +529,13 @@ def wf03():
             "    : 'Sorry, I could not process that just now. Please share your order ID (like UT1003) or ask about returns, sizes, delivery, offers or stock.';\n"
             "}\n"
             "const bigRefund = intent.refund && Number(order.amount_inr || 0) > 5000;\n"
-            "const needs = (intent.escalate || bigRefund) && !/TKT-\\d+/.test(reply);\n"
+            "// Did the agent already escalate in this run? Its reply may say so without the ticket ID, so look at\n"
+            "// the escalate_to_human tool itself - otherwise one message would create two tickets.\n"
+            "const steps = $('ShopAssist AI Agent').first().json.intermediateSteps || [];\n"
+            "const esc = steps.filter(s => ((s.action || {}).tool || '') === 'escalate_to_human');\n"
+            "const toolTicket = esc.length ? ((JSON.stringify(esc.map(s => s.observation)).match(/TKT-\\d+/) || ['escalated'])[0]) : '';\n"
+            "if (/^TKT-/.test(toolTicket) && !/TKT-\\d+/.test(reply)) reply += `\\n\\nYour ticket ID is ${toolTicket}.`;\n"
+            "const needs = (intent.escalate || bigRefund) && !toolTicket && !/TKT-\\d+/.test(reply);\n"
             "const reason = intent.escalate ? 'Customer is upset or asked for a human' : 'Refund above Rs 5,000 needs human approval';\n"
             "return [{ json: { needs_ticket: needs, reply, language: intent.language || 'en',\n"
             "  customer_name: intent.name || order.customer_name || 'Unknown',\n"
