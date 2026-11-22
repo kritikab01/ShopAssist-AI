@@ -134,7 +134,9 @@
         "options": {
           "temperature": 0,
           "numCtx": 8192,
-          "think": false
+          "think": false,
+          "numPredict": 700,
+          "repeatPenalty": 1.1
         }
       },
       "id": "adc7acf1-c409-501f-a037-0d06e01b0337",

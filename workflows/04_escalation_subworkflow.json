@@ -72,6 +72,8 @@
           "temperature": 0,
           "numCtx": 8192,
           "think": false,
+          "numPredict": 700,
+          "repeatPenalty": 1.1,
           "format": "json"
         }
       },

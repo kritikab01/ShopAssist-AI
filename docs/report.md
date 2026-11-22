@@ -214,6 +214,40 @@ Orders: 10 worth Rs 30,285 (3 shipped, 2 delivered, 1 delayed, 1 out for deliver
 1 cancelled). The numbers come from repeated testing, not real customers. In live use, the "resolved without a
 human" share is the main KPI: about 4 in 5 conversations needed no staff time.
 
+### Re-run on 22 Nov 2026 (v2: 17 tests, stricter scoring)
+
+v2 grades every answer three ways: keywords, a live-database fact check and an AI judge (a second, larger
+model, `qwen2.5:14b`) that flags invented facts. Full table: `docs/evaluation_results.md`; KPIs:
+`docs/kpi_report.md`.
+
+| Run | Passed | Avg. time | Avg. judge score | What changed |
+|---|---|---|---|---|
+| 1 | 5 / 17 | 48 s | 2.6 / 5 | judge fell back to the 3B chat model and marked correct answers as invented; 2 chats hit the 240 s time-out |
+| 2 | 9 / 17 | 42 s | 3.8 / 5 | judge uses `qwen2.5:14b`; replies capped at 700 tokens (`numPredict`) – no more time-outs |
+| 3 | 9 / 17 | 25 s | 3.5 / 5 | one-ticket-per-escalation fix (below) |
+
+**Observations from the re-run:**
+
+- **Stricter scoring is the main reason for the lower score than v1's 14 / 14.** Keyword checks passed on all 17
+  answers in run 3; the judge failed 8. A few of those are the judge being wrong (test 7 declined the Python
+  request correctly), most are real mistakes of the 3B model: an extra "keep exact change ready" in the
+  returns answer (1), a refund promised instead of escalated (8), an answer in Hindi script to a Hinglish
+  question (16), invented offer details (11).
+- **Run-away answers fixed.** The small model sometimes kept generating until the workflow time-out (combined
+  and Hinglish questions). Capping each reply at 700 tokens with a small repeat penalty removed every time-out
+  and halved the average answer time (48 s → 25 s).
+- **Duplicate tickets fixed.** The KPI report showed tickets in pairs: when the agent escalated through its tool
+  but did not write the ticket ID in its reply, the guaranteed-escalation step created a second ticket. The
+  agent now returns its tool steps and the step checks them. Tested: 3 angry messages → exactly 3 tickets, in
+  both cases (agent escalated itself / step escalated). Tickets before the fix (TKT-0013 – TKT-0024) include
+  duplicates, so the KPI ticket counts below 22 Nov are inflated.
+- **Next step for quality:** the same workflows with a bigger chat model (`qwen2.5:14b`, or Groq in the cloud
+  profile) should fix most remaining judge failures, at the cost of slower answers on a laptop.
+
+KPIs on 22 Nov 2026 (live database, testing traffic only): 107 conversations, 72 % resolved without a human,
+30 tickets (see note on duplicates above), 26 verified identity checks and 3 blocked wrong-digit attempts,
+5 low-stock products, 6 draft purchase orders.
+
 ## 6b. Version 2 (November 2026): closing the gaps
 
 After submission, every limitation that an interviewer or reviewer would spot was fixed:
