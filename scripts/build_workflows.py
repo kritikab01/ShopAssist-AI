@@ -1,4 +1,4 @@
-"""Generate the five n8n workflow JSON files in workflows/.
+"""Generate the seven n8n workflow JSON files in workflows/.
 
 Why a generator? It keeps the agent system prompt (prompts/agent_system_prompt.md) and the
 ticket JSON schema (prompts/ticket_schema.json) in ONE place, and guarantees every workflow
@@ -25,6 +25,13 @@ CHAT_MODEL = "qwen2.5:3b"
 EMBED_MODEL = "nomic-embed-text"  # 768-dim vectors -> Pinecone index must be dimension 768
 NUM_CTX = 8192  # Ollama's default context (2048 tokens) is too small for the agent prompt + search results
 
+# Cloud profile (python3 scripts/build_workflows.py --cloud -> workflows/cloud/*.json), for hosting without a
+# laptop: Groq (free API, fast Llama models with tool calling) for chat and Cohere multilingual embeddings
+# (free trial key, 1024 dims, also understands Hindi) -> its own Pinecone index "shopassist-cloud" (1024 dims).
+CLOUD = {"chat_model": "llama-3.3-70b-versatile", "embed_model": "embed-multilingual-v3.0",
+         "index": "shopassist-cloud", "dimension": 1024}
+PROFILE = "local"  # set by main(): "local" (Ollama) or "cloud" (Groq + Cohere)
+
 # Placeholder credentials: after import, open each node and pick your own credential.
 CRED = {
     "ollamaApi": {"id": "REPLACE_ME_ollama", "name": "Ollama account"},
@@ -33,10 +40,68 @@ CRED = {
     "slackApi": {"id": "REPLACE_ME_slack", "name": "Slack account"},
     "twilioApi": {"id": "REPLACE_ME_twilio", "name": "Twilio account"},
     "smtp": {"id": "REPLACE_ME_smtp", "name": "Gmail SMTP"},
+    "groqApi": {"id": "REPLACE_ME_groq", "name": "Groq account"},
+    "cohereApi": {"id": "REPLACE_ME_cohere", "name": "Cohere account"},
 }
 TWILIO_FROM = "+10000000000"  # placeholder: replace with your Twilio phone number in n8n
 SUPPORT_EMAIL = "support@urbanthread.example"  # placeholder: replace with your own inbox
 SENDER_EMAIL = "your.gmail@gmail.com"  # placeholder: the Gmail account used in SMTP credential
+# Address of n8n as the manager's browser sees it (approval links). scripts/import_to_n8n.py replaces this
+# placeholder with N8N_PUBLIC_URL (or N8N_URL) from .env, e.g. http://localhost:5679 or your tunnel / cloud URL.
+PUBLIC_N8N = "__N8N_PUBLIC_URL__"
+
+# One-click PO decision (workflow 07): only changes a PO that is still pending AND whose secret token matches.
+PO_DECISION_SQL = (
+    "-- $1 = PO ID, $2 = approve / reject, $3 = secret token from the link, $4 = who decided\n"
+    "UPDATE purchase_orders po\n"
+    "SET status = CASE WHEN LOWER($2) = 'approve' THEN 'approved' ELSE 'rejected' END,\n"
+    "    decided_at = now(), decided_by = COALESCE(NULLIF(TRIM($4), ''), 'manager')\n"
+    "FROM products p\n"
+    "WHERE p.sku = po.sku AND po.po_id = UPPER(TRIM($1)) AND po.approval_token = $3\n"
+    "  AND po.status = 'pending_approval' AND LOWER($2) IN ('approve', 'reject')\n"
+    "RETURNING po.po_id, po.sku, po.quantity, po.supplier, po.est_cost_inr, po.status, po.decided_by,\n"
+    "          p.name || COALESCE(' (' || p.size || ')', '') AS product, p.supplier_phone;"
+)
+
+# Identity check for order_lookup: an order is only shown when the customer gives the order ID AND the last 4 digits
+# of the phone number on that order. Every check is logged in verification_attempts; 5 wrong tries in 15 minutes
+# lock the order for the chat (4 digits = 10,000 combinations, so guessing is stopped long before it can work).
+# The result always has a 'verification' and an 'instruction' column, which tells the model exactly what to do.
+# (Tested in tests/test_sql.py against a real Postgres.)
+ORDER_LOOKUP_SQL = (
+    "-- $1 = order ID, $2 = last 4 digits of the phone number on the order\n"
+    "WITH input AS (\n"
+    "  SELECT UPPER(TRIM(COALESCE($1, ''))) AS oid,\n"
+    "         RIGHT(REGEXP_REPLACE(COALESCE($2, ''), '[^0-9]', '', 'g'), 4) AS last4\n"
+    "), o AS (\n"
+    "  SELECT orders.* FROM orders, input WHERE orders.order_id = input.oid\n"
+    "), fails AS (\n"
+    "  SELECT count(*) AS n FROM verification_attempts v, input\n"
+    "  WHERE v.order_id = input.oid AND NOT v.success AND v.created_at > now() - interval '15 minutes'\n"
+    "), chk AS (\n"
+    "  SELECT CASE\n"
+    "    WHEN NOT EXISTS (SELECT 1 FROM o) THEN 'not_found'\n"
+    "    WHEN (SELECT n FROM fails) >= 5 THEN 'locked'\n"
+    "    WHEN length((SELECT last4 FROM input)) < 4 THEN 'need_phone'\n"
+    "    WHEN (SELECT RIGHT(phone, 4) FROM o) = (SELECT last4 FROM input) THEN 'verified'\n"
+    "    ELSE 'wrong_phone' END AS result\n"
+    "), log AS (\n"
+    "  INSERT INTO verification_attempts (order_id, success)\n"
+    "  SELECT (SELECT oid FROM input), result = 'verified' FROM chk WHERE result IN ('verified', 'wrong_phone')\n"
+    ")\n"
+    "SELECT chk.result AS verification,\n"
+    "  CASE chk.result\n"
+    "    WHEN 'verified' THEN 'Identity verified. Share these order details with the customer.'\n"
+    "    WHEN 'need_phone' THEN 'Do NOT share any order details. Ask the customer for the last 4 digits of the phone number used for this order.'\n"
+    "    WHEN 'wrong_phone' THEN 'The digits do not match this order. Do NOT share any order details. Ask the customer to check the number, or offer a human agent.'\n"
+    "    WHEN 'locked' THEN 'Too many wrong attempts for this order. Do NOT share any details. Offer to connect the customer with a human (escalate_to_human).'\n"
+    "    ELSE 'No order with this ID. Ask the customer to check the order ID (format UT followed by 4 digits).' END AS instruction,\n"
+    "  o.order_id, o.customer_name, o.items, o.amount_inr, o.payment_method, o.status, o.city,\n"
+    "  o.order_date::text AS order_date, o.expected_delivery::text AS expected_delivery, o.courier, o.tracking_no,\n"
+    "  (SELECT string_agg(e.status || ' (' || to_char(e.created_at, 'DD Mon') || ')', ' -> ' ORDER BY e.created_at)\n"
+    "     FROM order_events e WHERE e.order_id = o.order_id) AS history\n"
+    "FROM chk LEFT JOIN o ON chk.result = 'verified';"
+)
 
 
 # ---------------------------------------------------------------- helpers
@@ -87,7 +152,11 @@ class WF:
         }
         path = OUT_DIR / filename
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        print("wrote", path.relative_to(ROOT))
+        print("wrote", path.relative_to(ROOT) if path.is_relative_to(ROOT) else path)
+
+
+def index_name():
+    return CLOUD["index"] if PROFILE == "cloud" else PINECONE_INDEX
 
 
 def rl(value, mode="list"):
@@ -96,6 +165,9 @@ def rl(value, mode="list"):
 
 
 def ollama_chat(wf, name, pos, temperature=0.2, json_mode=False):
+    if PROFILE == "cloud":
+        return wf.node(name.replace("Ollama", "Groq"), "@n8n/n8n-nodes-langchain.lmChatGroq", 1, pos,
+                       {"model": CLOUD["chat_model"], "options": {"temperature": temperature}}, ["groqApi"])
     options = {"temperature": temperature, "numCtx": NUM_CTX,
                "think": False}  # qwen2.5 is not a "thinking" model; n8n's default (true) can be rejected
     if json_mode:
@@ -105,6 +177,9 @@ def ollama_chat(wf, name, pos, temperature=0.2, json_mode=False):
 
 
 def ollama_embeddings(wf, name, pos):
+    if PROFILE == "cloud":
+        return wf.node(name.replace("Ollama", "Cohere"), "@n8n/n8n-nodes-langchain.embeddingsCohere", 1, pos,
+                       {"modelName": CLOUD["embed_model"]}, ["cohereApi"])
     return wf.node(name, "@n8n/n8n-nodes-langchain.embeddingsOllama", 1, pos,
                    {"model": EMBED_MODEL}, ["ollamaApi"])
 
@@ -114,9 +189,14 @@ def text_splitter(wf, name, pos):
                    1, pos, {"chunkSize": 1000, "chunkOverlap": 200, "options": {}})
 
 
-def pinecone_insert(wf, name, pos):
+def pinecone_insert(wf, name, pos, namespace):
+    """Insert into ONE namespace per knowledge base, emptied first: re-running ingestion replaces the
+    knowledge base instead of adding duplicate vectors (safe to run every day, e.g. after a policy change).
+    n8n (node 1.3) collects all documents first and inserts them in batches of embeddingBatchSize; the namespace
+    is cleared before each batch, so the batch size is set far above our document count -> cleared exactly once."""
     return wf.node(name, "@n8n/n8n-nodes-langchain.vectorStorePinecone", 1.3, pos,
-                   {"mode": "insert", "pineconeIndex": rl(PINECONE_INDEX), "options": {}},
+                   {"mode": "insert", "pineconeIndex": rl(index_name()), "embeddingBatchSize": 5000,
+                    "options": {"clearNamespace": True, "pineconeNamespace": namespace}},
                    ["pineconeApi"])
 
 
@@ -154,8 +234,8 @@ def wf01():
               "**Goal:** load the store FAQ/policy PDF into the Pinecone index `shopassist` "
               "so the agent can search it (RAG).\n\n"
               "Flow: Manual trigger → download PDF → split into 1000-char chunks (200 overlap) → "
-              "embed with Ollama `nomic-embed-text` (768 dims) → insert with metadata `source = faq`.\n\n"
-              "**Run once** (running again adds duplicates – clear the index first).\n\n"
+              "embed with Ollama `nomic-embed-text` (768 dims) → replace namespace `faq` (metadata `source = faq`).\n\n"
+              "**Safe to re-run:** namespace `faq` is emptied and refilled (no duplicate vectors).\n\n"
               "Course: Sessions 7–9 (RAG with Pinecone), 18 (metadata).",
               (-80, -360), w=520, h=300, color=4)
     t = wf.node("Start Ingestion", "n8n-nodes-base.manualTrigger", 1, (0, 0))
@@ -176,7 +256,7 @@ def wf01():
             "return $input.all();\n"
         ),
     })
-    pc = pinecone_insert(wf, "Insert into Pinecone (source=faq)", (680, 0))
+    pc = pinecone_insert(wf, "Replace FAQ in Pinecone (namespace faq)", (680, 0), "faq")
     emb = ollama_embeddings(wf, "Ollama Embeddings", (600, 240))
     loader = wf.node("Default Data Loader (PDF)", "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
                      1.1, (800, 240), {
@@ -211,7 +291,7 @@ def wf02():
     wf = WF("02 Scrape Web Pages, Summarize and Store", timeout=1200)
     wf.sticky("Overview – Workflow 02",
               "**Goal:** scrape store web pages, summarize each with the LLM, and store the summaries "
-              "in Pinecone with metadata `source = website` and `url`.\n\n"
+              "in Pinecone namespace `website` (metadata `source = website`, `url`), replacing the old ones.\n\n"
               "Flow: read `data/urls.txt` → one item per URL → HTTP GET page → extract text from HTML → "
               "LLM summary → embed → Pinecone insert.\n\n"
               "Course: Capstone (web scraping + summarization), Sessions 5–6 (LLM chains), "
@@ -268,7 +348,7 @@ def wf02():
         ]},
         "options": {},
     })
-    pc = pinecone_insert(wf, "Insert into Pinecone (source=website)", (1480, 0))
+    pc = pinecone_insert(wf, "Replace Website KB in Pinecone (namespace website)", (1480, 0), "website")
     emb = ollama_embeddings(wf, "Ollama Embeddings", (1400, 240))
     loader = wf.node("Default Data Loader (summary)", "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
                      1.1, (1600, 240), {
@@ -307,9 +387,9 @@ def wf03():
     wf.sticky("Overview – Workflow 03",
               "**Goal:** the customer-facing AI agent on a **public chat URL**.\n\n"
               "The Tools Agent decides which tool to call:\n"
-              "- `faq_knowledge` – Pinecone, filter `source=faq`\n"
-              "- `website_knowledge` – Pinecone, filter `source=website`\n"
-              "- `order_lookup` – Postgres query by order ID or phone\n"
+              "- `faq_knowledge` – Pinecone namespace `faq`\n"
+              "- `website_knowledge` – Pinecone namespace `website`\n"
+              "- `order_lookup` – Postgres, order ID + last 4 phone digits (identity check, lockout after 5 tries)\n"
               "- `escalate_to_human` – calls workflow 04 (Slack + SMS + e-mail)\n"
               "- `inventory_expert` – asks the **Inventory Agent** (workflow 06) – multi-agent\n\n"
               "**Guardrails:** *Detect Intent* (rules) before the agent; after it, if a human is needed and the "
@@ -347,10 +427,10 @@ def wf03():
             "mode": "retrieve-as-tool",
             "toolName": name,
             "toolDescription": desc,
-            "pineconeIndex": rl(PINECONE_INDEX),
+            "pineconeIndex": rl(index_name()),
             "topK": 4,
             "includeDocumentMetadata": True,
-            "options": {"metadata": metadata(("source", source))},
+            "options": {"pineconeNamespace": source, "metadata": metadata(("source", source))},
         }, ["pineconeApi"])
         emb = ollama_embeddings(wf, f"Ollama Embeddings ({source})", (x, 520))
         wf.link(emb, node, "ai_embedding")
@@ -367,24 +447,16 @@ def wf03():
     orders = wf.node("order_lookup", "n8n-nodes-base.postgresTool", 2.5, (860, 300), {
         "descriptionType": "manual",
         "toolDescription": (
-            "Look up a customer's order in the database. Input: exactly ONE order ID (like UT1003) "
-            "or ONE phone number (like +919000000003 or 9000000003). Returns status, items, amount in Rs, "
-            "payment method, expected delivery date, courier and tracking number."
+            "Look up a customer's order. Inputs: order_id (like UT1003) and phone_last4 (the last 4 digits of "
+            "the phone number on the order, or empty if the customer has not given them). Order details are "
+            "only returned when the digits match; otherwise follow the 'instruction' field of the result."
         ),
         "operation": "executeQuery",
-        "query": (
-            "-- $1 = order ID or phone number provided by the customer\n"
-            "SELECT order_id, customer_name, items, amount_inr, payment_method, status, city,\n"
-            "       order_date::text AS order_date, expected_delivery::text AS expected_delivery, courier, tracking_no\n"
-            "FROM orders\n"
-            "WHERE order_id = UPPER(TRIM($1))\n"
-            "   OR RIGHT(phone, 10) = RIGHT(REGEXP_REPLACE($1, '[^0-9]', '', 'g'), 10)\n"
-            "LIMIT 5;"
-        ),
+        "query": ORDER_LOOKUP_SQL,
         "options": {
             "queryReplacement": (
-                "={{ $fromAI('order_id_or_phone', 'The order ID (e.g. UT1003) or phone number "
-                "given by the customer', 'string') }}"
+                "={{ [ $fromAI('order_id', 'The order ID given by the customer, e.g. UT1003', 'string', ''), "
+                "$fromAI('phone_last4', 'Last 4 digits of the phone number on the order, or empty string', 'string', '') ] }}"
             ),
         },
     }, ["postgres"])
@@ -415,33 +487,10 @@ def wf03():
 
     # Small local models follow an explicit note far better than a long system prompt. This step spots clear
     # signals (anger / wants a human, refund, out-of-scope) and adds a short instruction to the message.
+    # Rules live in prompts/detect_intent.js (anger, sarcasm, Hindi/Hinglish, refunds, stock, identity check);
+    # tests/test_guardrails.py runs that exact file with Node.
     guard = wf.node("Detect Intent (rules)", "n8n-nodes-base.code", 2, (180, 0), {
-        "jsCode": (
-            "// Rule-based pre-check: adds a NOTE for the agent when the message clearly needs a special action.\n"
-            "const msg = String($json.chatInput || '');\n"
-            "const m = msg.toLowerCase();\n"
-            "const notes = [];\n"
-            "if (/manager|human|real person|complain|worst|third time|angry|furious|ridiculous|fed up|cheat|fraud/.test(m))\n"
-            "  notes.push('The customer is upset or asks for a human: look up the order if an order ID is given, then you MUST call escalate_to_human and give the ticket ID.');\n"
-            "if (/refund/.test(m) && /ut\\d{4}/.test(m))\n"
-            "  notes.push('Refund request: call order_lookup; if the order amount is more than Rs 5000 you MUST call escalate_to_human (you cannot approve it) and give the ticket ID.');\n"
-            "if (/\\b(stock|in stock|available|availability|restock|reorder|purchase order|inventory|low stock)\\b/.test(m) && !/stock market/.test(m))\n"
-            "  notes.push('This is about stock or purchase orders: call inventory_expert with the full question and pass its answer on. Do not guess availability.');\n"
-            "if (/return|exchange|does not fit|doesn't fit|too (small|big|tight|loose)|wrong size/.test(m) && /ut\\d{4}/.test(m))\n"
-            "  notes.push('Return question about an order: call order_lookup for the order AND faq_knowledge for the return and refund policy, then answer with both (no stock check needed).');\n"
-            "if (/diwali|discount|coupon|promo|offer|sale|code|gift card|loyalty/.test(m) && !/python|javascript|script|program/.test(m))\n"
-            "  notes.push('Offers and coupon codes: call website_knowledge first and give ONLY codes that appear in its result. Never invent a code.');\n"
-            "if (/python|javascript|java |code|script|program|homework|essay|poem|recipe|weather|cricket|movie|stock market|bitcoin/.test(m)\n"
-            "    && !/order|ut\\d{4}|return|refund|size|deliver|kurta|shirt|jeans|hoodie|in stock|restock|low stock/.test(m))\n"
-            "  notes.push('This is NOT about UrbanThread. Do not answer it and do not write code: reply that you can only help with UrbanThread orders, returns, sizes, delivery, offers and stock.');\n"
-            "// Flags for the 'guaranteed escalation' step after the agent.\n"
-            "const oid = (msg.toUpperCase().match(/UT\\d{4}/) || [''])[0];\n"
-            "const phone = (msg.replace(/[\\s-]/g, '').match(/(\\+?91)?[6-9]\\d{9}/) || [''])[0];\n"
-            "const name = (msg.match(/\\b(?:i am|i'm|my name is|this is)\\s+([A-Z][a-z]+)/) || ['', ''])[1];\n"
-            "const flags = { escalate: /manager|human|real person|complain|worst|third time|angry|furious|ridiculous|fed up|cheat|fraud/.test(m),\n"
-            "  refund: /refund/.test(m), order_id: oid, phone, name, original: msg };\n"
-            "return [{ json: { ...$json, intent: flags, chatInput: notes.length ? msg + '\\n\\n[NOTE FOR ASSISTANT: ' + notes.join(' ') + ']' : msg } }];\n"
-        ),
+        "jsCode": (ROOT / "prompts" / "detect_intent.js").read_text(encoding="utf-8"),
     })
     wf.link(chat, guard)
     wf.link(guard, agent)
@@ -453,11 +502,13 @@ def wf03():
     amount = wf.node("Order Details (for escalation check)", "n8n-nodes-base.postgres", 2.5, (720, -220), {
         "operation": "executeQuery",
         "query": (
-            "SELECT order_id, customer_name, phone, amount_inr, items, status, expected_delivery::text AS expected_delivery, courier, tracking_no\n"
+            "-- internal check only (amount for the refund rule); details are shown only if verified = true\n"
+            "SELECT order_id, customer_name, phone, amount_inr, items, status, expected_delivery::text AS expected_delivery, courier, tracking_no,\n"
+            "       (length($2) = 4 AND RIGHT(phone, 4) = $2) AS verified\n"
             "FROM orders\n"
             "WHERE order_id = UPPER(TRIM($1)) LIMIT 1;"
         ),
-        "options": {"queryReplacement": "={{ [ " + INTENT + ".order_id || 'none' ] }}"},
+        "options": {"queryReplacement": "={{ [ " + INTENT + ".order_id || 'none', " + INTENT + ".last4 || '' ] }}"},
     }, ["postgres"], alwaysOutputData=True, onError="continueRegularOutput")
     decide = wf.node("Needs a Ticket? (rules)", "n8n-nodes-base.code", 2, (940, -220), {
         "jsCode": (
@@ -466,15 +517,17 @@ def wf03():
             "const order = $json.order_id ? $json : {};\n"
             "let reply = String($('ShopAssist AI Agent').first().json.output || '').trim();\n"
             "if (!reply) {  // the AI step failed (e.g. bad tool call): answer from the database / rules instead\n"
-            "  const r = order.order_id ? $('Order Details (for escalation check)').first().json : null;\n"
+            "  const r = order.order_id && order.verified ? order : null;  // never show details without the phone check\n"
             "  reply = r ? `Your order ${r.order_id} (${r.items}) is ${String(r.status).replace(/_/g, ' ')}. Expected delivery: ${String(r.expected_delivery).slice(0, 10)}, courier ${r.courier}, tracking ${r.tracking_no}.`\n"
+            "    : (order.order_id && intent.last4) ? `The phone digits you gave do not match order ${order.order_id}, so I cannot show it. Please check the last 4 digits of the phone number used for the order.`\n"
+            "    : (order.order_id && !intent.escalate && !intent.refund) ? `To keep your order private, please share the last 4 digits of the phone number used for order ${order.order_id}.`\n"
             "    : (intent.escalate || intent.refund) ? 'I am sorry for the trouble. Let me connect you with our support team.'\n"
             "    : 'Sorry, I could not process that just now. Please share your order ID (like UT1003) or ask about returns, sizes, delivery, offers or stock.';\n"
             "}\n"
             "const bigRefund = intent.refund && Number(order.amount_inr || 0) > 5000;\n"
             "const needs = (intent.escalate || bigRefund) && !/TKT-\\d+/.test(reply);\n"
             "const reason = intent.escalate ? 'Customer is upset or asked for a human' : 'Refund above Rs 5,000 needs human approval';\n"
-            "return [{ json: { needs_ticket: needs, reply,\n"
+            "return [{ json: { needs_ticket: needs, reply, language: intent.language || 'en',\n"
             "  customer_name: intent.name || order.customer_name || 'Unknown',\n"
             "  phone: intent.phone || order.phone || '',\n"
             "  order_id: intent.order_id || '',\n"
@@ -509,8 +562,11 @@ def wf03():
     })
     with_ticket = wf.node("Reply + Ticket ID", "n8n-nodes-base.set", 3.4, (1600, -320), {
         "assignments": {"assignments": [{"id": "o1", "name": "output", "type": "string", "value": (
-            "={{ $('Needs a Ticket? (rules)').item.json.reply }}\n\nI have passed this to our human support "
-            "team. Your ticket ID is {{ $json.ticket_id }} - a team member will contact you within 4 business hours."
+            "={{ $('Needs a Ticket? (rules)').item.json.reply }}\n\n{{ {"
+            "hinglish: 'Maine aapki problem hamari support team ko bhej di hai. Aapka ticket ID ' + $json.ticket_id + ' hai - 4 business hours mein team aapse contact karegi.', "
+            "hi: 'मैंने आपकी समस्या हमारी सपोर्ट टीम को भेज दी है। आपका टिकट ID ' + $json.ticket_id + ' है - 4 कार्य घंटों में टीम आपसे संपर्क करेगी।'"
+            "}[$('Needs a Ticket? (rules)').item.json.language] || 'I have passed this to our human support team. Your ticket ID is ' + "
+            "$json.ticket_id + ' - a team member will contact you within 4 business hours.' }}"
         )}]},
         "options": {},
     })
@@ -596,8 +652,10 @@ def wf04():
             "let phone = String(t.phone || inp.phone || '').replace(/[^0-9+]/g, '');\n"
             "if (/^[0-9]{10}$/.test(phone)) phone = '+91' + phone;  // Indian 10-digit number -> E.164\n"
             "const oid = (String(t.order_id || '') + ' ' + String(inp.order_id || '') + ' ' + text).toUpperCase().match(/UT\\d{4}/);\n"
-            "const issueGuess = text.includes('refund') ? 'refund' : text.includes('late') || text.includes('delay') ? 'delivery' : 'other';\n"
-            "const angry = /angry|manager|worst|third time|furious|complain/.test(text);\n"
+            "const issueGuess = /refund|paise? wapas|money back/.test(text) ? 'refund' : /late|delay|kab aayega|not (here|delivered|arrived)|where is|deliver/.test(text) ? 'delivery' : 'other';\n"
+            "const angry = /angry|manager|worst|third time|furious|complain|sarcas|upset|bakwas|ghatiya/.test(text);\n"
+            "const raw = String(inp.reason || '') + ' ' + String(inp.conversation_summary || '');\n"
+            "const language = /[\\u0900-\\u097F]/.test(raw) ? 'hi' : /\\b(kya|hai|mera|kab|nahi|aayega|chahiye|wapas|karo|bhai)\\b/i.test(raw) ? 'hinglish' : 'en';\n"
             "return [{ json: { output: {\n"
             "  customer_name: String(t.customer_name || inp.customer_name || 'Unknown').slice(0, 100),\n"
             "  phone: phone.slice(0, 20),\n"
@@ -607,6 +665,7 @@ def wf04():
             "  priority: pick(t.priority, ['low', 'medium', 'high'], 'high'),\n"
             "  summary: String(t.summary || inp.conversation_summary || inp.reason || '').slice(0, 2000),\n"
             "  suggested_action: String(t.suggested_action || 'Contact the customer and review the chat.').slice(0, 1000),\n"
+            "  language,\n"
             "} } }];\n"
         ),
     })
@@ -615,14 +674,14 @@ def wf04():
         "operation": "executeQuery",
         "query": (
             "INSERT INTO tickets (customer_name, phone, order_id, issue_type, sentiment, priority,\n"
-            "                     summary, suggested_action)\n"
-            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n"
+            "                     summary, suggested_action, language)\n"
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n"
             "RETURNING ticket_id, priority, created_at;"
         ),
         "options": {"queryReplacement": (
             "={{ [ $json.output.customer_name, $json.output.phone, $json.output.order_id, "
             "$json.output.issue_type, $json.output.sentiment, $json.output.priority, "
-            "$json.output.summary, $json.output.suggested_action ] }}"
+            "$json.output.summary, $json.output.suggested_action, $json.output.language ] }}"
         )},
     }, ["postgres"])
     slack = wf.node("Alert Slack #support-escalations", "n8n-nodes-base.slack", 2.3, (880, 0), {
@@ -716,15 +775,21 @@ def wf05():
     upd = wf.node("Update Order Status", "n8n-nodes-base.postgres", 2.5, (220, 0), {
         "operation": "executeQuery",
         "query": (
-            "UPDATE orders\n"
-            "SET status = LOWER($2),\n"
-            "    expected_delivery = COALESCE(NULLIF($3, '')::date, expected_delivery),\n"
-            "    updated_at = now()\n"
-            "WHERE order_id = UPPER($1)\n"
-            "RETURNING order_id, customer_name, phone, status, expected_delivery;"
+            "WITH u AS (\n"
+            "  UPDATE orders\n"
+            "  SET status = LOWER($2),\n"
+            "      expected_delivery = COALESCE(NULLIF($3, '')::date, expected_delivery),\n"
+            "      updated_at = now()\n"
+            "  WHERE order_id = UPPER($1)\n"
+            "  RETURNING order_id, customer_name, phone, status, expected_delivery\n"
+            "), e AS (  -- status history for the timeline / dashboard\n"
+            "  INSERT INTO order_events (order_id, status, note)\n"
+            "  SELECT order_id, status, COALESCE(NULLIF($4, ''), 'Status update from the store system') FROM u\n"
+            ")\n"
+            "SELECT * FROM u;"
         ),
         "options": {"queryReplacement": (
-            "={{ [ $json.body.order_id, $json.body.status, $json.body.new_expected_delivery || '' ] }}"
+            "={{ [ $json.body.order_id, $json.body.status, $json.body.new_expected_delivery || '', $json.body.note || '' ] }}"
         )},
     }, ["postgres"], alwaysOutputData=True)
     cond = wf.node("Is Delayed?", "n8n-nodes-base.if", 2.2, (440, 0), {
@@ -787,8 +852,8 @@ def wf06():
               "**Second domain-expert agent** (multi-agent). Called by the support agent (03) through the "
               "`inventory_expert` tool.\n\n"
               "Tools: `stock_lookup` (Postgres `products`) and `create_purchase_order` (inserts into "
-              "`purchase_orders`, status *pending_approval*). After the agent answers, a Slack message asks "
-              "a manager to approve any new purchase order.\n\n"
+              "`purchase_orders`, status *pending_approval*). After the agent answers, a Slack message gives "
+              "the manager a **Review and approve / reject** link per new purchase order (workflow 07).\n\n"
               "Course: 12–13 (multi-agent, sub-workflows), 19–20 (agent + Postgres), Slack API.",
               (-120, -420), w=560, h=340, color=4)
     trig = wf.node("When Called by Support Agent", "n8n-nodes-base.executeWorkflowTrigger", 1.1, (0, 0), {
@@ -853,21 +918,40 @@ def wf06():
             "$fromAI('reason', 'Short reason, e.g. stock 6 below reorder level 20', 'string') ] }}"
         )},
     }, ["postgres"])
-    slack = wf.node("Ask Manager to Approve (Slack)", "n8n-nodes-base.slack", 2.3, (560, 0), {
+    # Purchase orders this run created, with their secret approval token (only goes into the manager's message).
+    new_pos = wf.node("New Purchase Orders", "n8n-nodes-base.postgres", 2.5, (600, 0), {
+        "operation": "executeQuery",
+        "query": (
+            "SELECT po.po_id, po.sku, p.name || COALESCE(' (' || p.size || ')', '') AS product, po.quantity,\n"
+            "       po.supplier, po.est_cost_inr, po.approval_token\n"
+            "FROM purchase_orders po JOIN products p ON p.sku = po.sku\n"
+            "WHERE po.status = 'pending_approval' AND po.created_at > now() - interval '3 minutes'\n"
+            "ORDER BY po.id;"
+        ),
+        "options": {},
+    }, ["postgres"], alwaysOutputData=True, executeOnce=True, onError="continueRegularOutput")
+    slack = wf.node("Ask Manager to Approve (Slack)", "n8n-nodes-base.slack", 2.3, (820, 0), {
         "select": "channel",
         "channelId": rl("#support-escalations", "name"),
-        "text": "=:package: *Inventory Agent*\nRequest: {{ $('When Called by Support Agent').item.json.question }}\n"
-                "Answer: {{ $json.output }}\nPlease review any purchase order marked *pending_approval*.",
-        "otherOptions": {},
-    }, ["slackApi"], onError="continueRegularOutput")
-    ret = wf.node("Return Answer to Support Agent", "n8n-nodes-base.set", 3.4, (780, 0), {
+        "text": (
+            "=:package: *Inventory Agent*\nRequest: {{ $('When Called by Support Agent').item.json.question }}\n"
+            "Answer: {{ $('Inventory AI Agent').item.json.output }}\n"
+            "{{ $('New Purchase Orders').all().filter(i => i.json.po_id).map(i => ':memo: *' + i.json.po_id + '* ' + "
+            "i.json.quantity + ' x ' + i.json.product + ' from ' + i.json.supplier + ', approx. Rs ' + i.json.est_cost_inr + "
+            "' -> <" + PUBLIC_N8N + "/webhook/po-review?po=' + i.json.po_id + '&token=' + i.json.approval_token + "
+            "'|Review and approve / reject>').join('\\n') || '' }}"
+        ),
+        "otherOptions": {"unfurl_links": False, "unfurl_media": False},
+    }, ["slackApi"], onError="continueRegularOutput", executeOnce=True)
+    ret = wf.node("Return Answer to Support Agent", "n8n-nodes-base.set", 3.4, (1040, 0), {
         "assignments": {"assignments": [
             {"id": "a1", "name": "answer", "type": "string", "value": "={{ $('Inventory AI Agent').item.json.output }}"},
         ]},
         "options": {},
-    })
+    }, executeOnce=True)
     wf.link(trig, agent)
-    wf.link(agent, slack)
+    wf.link(agent, new_pos)
+    wf.link(new_pos, slack)
     wf.link(slack, ret)
     wf.link(llm, agent, "ai_languageModel")
     wf.link(stock, agent, "ai_tool")
@@ -875,7 +959,141 @@ def wf06():
     wf.save("06_inventory_agent.json")
 
 
-if __name__ == "__main__":
-    OUT_DIR.mkdir(exist_ok=True)
-    for build in (wf01, wf02, wf03, wf04, wf05, wf06):
+# ---------------------------------------------------------------- 07 purchase-order approval
+PAGE_STYLE = ("<meta name='viewport' content='width=device-width,initial-scale=1'><style>"
+              "*{box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0f0e17;color:#fffffe;display:grid;place-items:center;"
+              "min-height:100vh;margin:0;padding:16px}.c{background:#1b1a27;border-radius:20px;padding:24px;max-width:420px;"
+              "width:100%;box-shadow:0 0 0 2px #c6ff3d33}h1{margin:0 0 8px;font-size:22px}p{color:#b8b5c9}"
+              "b{color:#c6ff3d}button{font:600 16px system-ui;border:0;border-radius:999px;padding:12px 20px;margin:6px 6px 0 0;"
+              "cursor:pointer}.ok{background:#c6ff3d;color:#0f0e17}.no{background:#2b2a3a;color:#fffffe}</style>")
+
+
+def wf07():
+    wf = WF("07 Purchase Order Approval (Manager)", timeout=60)
+    wf.sticky("Overview – Workflow 07",
+              "**Human-in-the-loop approval** for purchase orders drafted by the Inventory Agent (06).\n\n"
+              "1. Slack message (06) / dashboard → `GET /webhook/po-review?po=PO-0001&token=…` shows a review page "
+              "(changes nothing – link previews and e-mail scanners can open it safely).\n"
+              "2. Manager presses **Approve** or **Reject** → `POST /webhook/po-decision` → PO updated only if the "
+              "secret token matches and it is still *pending_approval* → Slack confirmation → if approved, SMS to the "
+              "supplier (Twilio).\n\nCourse: webhooks, IF, Postgres, Slack, Twilio, human-in-the-loop.",
+              (-120, -460), w=620, h=380, color=4)
+    # --- review page (read only)
+    rv = wf.node("Review Link (GET)", "n8n-nodes-base.webhook", 2, (0, 0), {
+        "httpMethod": "GET", "path": "po-review", "responseMode": "responseNode", "options": {},
+    }, webhookId=str(uuid.uuid5(uuid.NAMESPACE_URL, "shopassist-po-review")))
+    find = wf.node("Find Purchase Order", "n8n-nodes-base.postgres", 2.5, (220, 0), {
+        "operation": "executeQuery",
+        "query": (
+            "SELECT po.po_id, po.quantity, po.supplier, po.est_cost_inr, po.status, po.reason, po.approval_token,\n"
+            "       p.name || COALESCE(' (' || p.size || ')', '') AS product, p.stock, p.reorder_level\n"
+            "FROM purchase_orders po JOIN products p ON p.sku = po.sku\n"
+            "WHERE po.po_id = UPPER(TRIM($1)) AND po.approval_token = $2;"
+        ),
+        "options": {"queryReplacement": "={{ [ $json.query.po || '', $json.query.token || '' ] }}"},
+    }, ["postgres"], alwaysOutputData=True)
+    page = wf.node("Show Review Page", "n8n-nodes-base.respondToWebhook", 1.1, (440, 0), {
+        "respondWith": "text",
+        "responseBody": (
+            "={{ \"<!doctype html><title>Purchase order</title>" + PAGE_STYLE + "<div class='c'>\" + ($json.po_id ? "
+            "('<h1>📦 ' + $json.po_id + '</h1><p><b>' + $json.quantity + ' x ' + $json.product + '</b><br>Supplier: ' + "
+            "$json.supplier + '<br>Estimated cost: Rs ' + $json.est_cost_inr + '<br>Stock now: ' + $json.stock + "
+            "' (reorder level ' + $json.reorder_level + ')<br>Reason: ' + ($json.reason || '-') + '</p>' + "
+            "($json.status === 'pending_approval' ? ('<form method=post action=po-decision>"
+            "<input type=hidden name=po value=' + $json.po_id + '><input type=hidden name=token value=' + "
+            "$json.approval_token + '><button class=ok name=action value=approve>✅ Approve</button>"
+            "<button class=no name=action value=reject>❌ Reject</button></form>') : "
+            "('<p>Already <b>' + $json.status + '</b>.</p>'))) : '<h1>🔒 Link not valid</h1><p>Check the link "
+            "in Slack.</p>') + '</div>' }}"
+        ),
+        "options": {"responseHeaders": {"entries": [{"name": "Content-Type", "value": "text/html; charset=utf-8"}]}},
+    })
+    # --- decision (changes data)
+    dec = wf.node("Decision (POST)", "n8n-nodes-base.webhook", 2, (0, 320), {
+        "httpMethod": "POST", "path": "po-decision", "responseMode": "responseNode", "options": {},
+    }, webhookId=str(uuid.uuid5(uuid.NAMESPACE_URL, "shopassist-po-decision")))
+    apply_ = wf.node("Apply Decision (token check)", "n8n-nodes-base.postgres", 2.5, (220, 320), {
+        "operation": "executeQuery",
+        "query": PO_DECISION_SQL,
+        "options": {"queryReplacement": (
+            "={{ [ $json.body.po || '', $json.body.action || '', $json.body.token || '', $json.body.by || '' ] }}"
+        )},
+    }, ["postgres"], alwaysOutputData=True)
+    valid = wf.node("Valid Decision?", "n8n-nodes-base.if", 2.2, (440, 320), {
+        "conditions": {
+            "options": {"caseSensitive": True, "leftValue": "", "typeValidation": "loose", "version": 2},
+            "conditions": [{"id": "v1", "leftValue": "={{ $json.po_id }}", "rightValue": "",
+                            "operator": {"type": "string", "operation": "notEmpty", "singleValue": True}}],
+            "combinator": "and",
+        },
+        "options": {},
+    })
+    slack = wf.node("Tell Team in Slack", "n8n-nodes-base.slack", 2.3, (660, 220), {
+        "select": "channel",
+        "channelId": rl("#support-escalations", "name"),
+        "text": ("={{ $json.status === 'approved' ? ':white_check_mark:' : ':x:' }} *{{ $json.po_id }}* "
+                 "{{ $json.status }} by {{ $json.decided_by }}: {{ $json.quantity }} x {{ $json.product }} "
+                 "from {{ $json.supplier }} (approx. Rs {{ $json.est_cost_inr }})"),
+        "otherOptions": {},
+    }, ["slackApi"], onError="continueRegularOutput")
+    approved = wf.node("Approved?", "n8n-nodes-base.if", 2.2, (880, 220), {
+        "conditions": {
+            "options": {"caseSensitive": True, "leftValue": "", "typeValidation": "loose", "version": 2},
+            "conditions": [{"id": "a1", "leftValue": "={{ $('Apply Decision (token check)').item.json.status }}",
+                            "rightValue": "approved", "operator": {"type": "string", "operation": "equals"}}],
+            "combinator": "and",
+        },
+        "options": {},
+    })
+    A = "$('Apply Decision (token check)').item.json"
+    sms = wf.node("SMS Supplier (Twilio)", "n8n-nodes-base.twilio", 1, (1100, 120), {
+        "from": TWILIO_FROM,
+        "to": "={{ " + A + ".supplier_phone }}",
+        "message": ("=UrbanThread purchase order {{ " + A + ".po_id }}: please supply {{ " + A + ".quantity }} x "
+                    "{{ " + A + ".product }} (SKU {{ " + A + ".sku }}). Reply to confirm the delivery date."),
+        "options": {},
+    }, ["twilioApi"], onError="continueRegularOutput")
+    RESULT = ("{ ok: !!" + A + ".po_id, po_id: " + A + ".po_id || null, status: " + A + ".status || null, "
+              "message: " + A + ".po_id ? ('Purchase order ' + " + A + ".status) : 'Link not valid or already decided' }")
+    done = wf.node("Show Result", "n8n-nodes-base.respondToWebhook", 1.1, (1320, 320), {
+        "respondWith": "text",
+        "responseBody": (
+            "={{ $('Decision (POST)').item.json.body.format === 'json' ? JSON.stringify(" + RESULT + ") : "
+            "\"<!doctype html><title>Purchase order</title>" + PAGE_STYLE + "<div class='c'>\" + (" + A + ".po_id ? "
+            "('<h1>' + (" + A + ".status === 'approved' ? '✅ ' : '❌ ') + " + A + ".po_id + ' ' + " + A + ".status + "
+            "'</h1><p>The team was told in Slack' + (" + A + ".status === 'approved' ? ' and the supplier got an SMS' : '') + "
+            "'.</p>') : '<h1>🔒 Not changed</h1><p>The link is not valid or this order was already decided.</p>') + "
+            "'</div>' }}"
+        ),
+        "options": {"responseHeaders": {"entries": [{"name": "Content-Type", "value":
+            "={{ $('Decision (POST)').item.json.body.format === 'json' ? 'application/json' : 'text/html; charset=utf-8' }}"}]}},
+    })
+    wf.link(rv, find)
+    wf.link(find, page)
+    wf.link(dec, apply_)
+    wf.link(apply_, valid)
+    wf.link(valid, slack, out_index=0)
+    wf.link(valid, done, out_index=1)
+    wf.link(slack, approved)
+    wf.link(approved, sms, out_index=0)
+    wf.link(approved, done, out_index=1)
+    wf.link(sms, done)
+    wf.save("07_po_approval.json")
+
+
+BUILDERS = (wf01, wf02, wf03, wf04, wf05, wf06, wf07)
+
+
+def build_all(out_dir=None, profile="local"):
+    """Write all workflows for one profile. Local -> workflows/, cloud -> workflows/cloud/."""
+    global OUT_DIR, PROFILE
+    PROFILE = profile
+    OUT_DIR = Path(out_dir) if out_dir else (ROOT / "workflows" / ("cloud" if profile == "cloud" else ""))
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    for build in BUILDERS:
         build()
+
+
+if __name__ == "__main__":
+    build_all(profile="local")
+    build_all(profile="cloud")

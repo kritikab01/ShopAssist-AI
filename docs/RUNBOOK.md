@@ -8,7 +8,7 @@ All commands run in Terminal inside the project folder:
 
 ## 0. Get the latest code
 ```bash
-git fetch origin && git reset --hard origin/claude/quirky-tesla-gzzg4y
+git fetch origin && git checkout main && git pull   # (or the branch you were given)
 pip3 install pg8000
 ```
 (`reset` keeps your `.env`; it is not tracked by Git.)
@@ -17,13 +17,15 @@ pip3 install pg8000
 ```bash
 python3 scripts/setup_database.py
 ```
-✅ You see row counts: orders 10, products 12, purchase_orders 0+, tickets 0+.
+✅ You see row counts: orders 10, products 12, purchase_orders 0+, tickets 0+ (v2 adds verification_attempts,
+order_events, chat_feedback - your existing data stays).
 
-## 2. Load / update all workflows in n8n (01–06)
+## 2. Load / update all workflows in n8n (01–07)
 ```bash
-python3 scripts/import_to_n8n.py
+python3 scripts/import_to_n8n.py --publish
 ```
-✅ `created`/`updated` for 04, **06 (new Inventory Agent)**, 03, 01, 02, 05.
+✅ `created`/`updated` for 04, 06, 03, 01, 02, 05, **07 (PO approval)**, then `published 04, 06, 07, 03, 05`.
+It also creates the Postgres and Pinecone credentials from `.env` if they are missing.
 
 ## 3. Health check
 ```bash
@@ -32,12 +34,14 @@ python3 scripts/doctor.py
 ✅ Every workflow shows `AI=OLLAMA` (05 shows `AI=-`), no missing credentials, `n8n -> Ollama: Connection successful`.
 If it says **chat messages go to the wrong port**, see step 9.
 
-## 4. Fill the knowledge base (only once – re-running duplicates vectors)
+## 4. Fill the knowledge base (safe to re-run – each run replaces its own Pinecone namespace)
 In n8n: open **01 Ingest FAQ PDF** → **Execute workflow** → all nodes green.
 Then **02 Scrape Web Pages** → **Execute workflow** (1–2 minutes).
+`python3 scripts/doctor.py` then shows `namespaces: faq=6, website=4`. Upgrading from v1? Run
+`python3 scripts/setup_pinecone.py --clean-old` once to delete the old vectors in the default namespace.
 
-## 5. Publish (n8n 2.x) – in this order
-**04** → **06** → **03** → **05** (button *Publish*, top right of each workflow).
+## 5. Publish (n8n 2.x)
+Done by `--publish` in step 2. By hand: **04** → **06** → **07** → **03** → **05** (button *Publish*).
 Sub-workflows (04, 06) must be published before the agent (03) can call them.
 
 ## 6. Test from the Terminal (works even if n8n's chat window does not)
@@ -45,18 +49,20 @@ Sub-workflows (04, 06) must be published before the agent (03) can call them.
 python3 scripts/test_chat.py                 # Ollama alone, workflow 03 chat, workflow 05 webhook
 python3 scripts/chat_cli.py                  # interactive chat: type anything, /quit to exit
 ```
-Try one-word messages: `UT1002`, `returns`, `diwali`, `sizes`, `stock`, `low stock`, `kurta`, `human`.
+Try one-word messages: `UT1002` (then `0002`, the phone's last 4 digits), `returns`, `diwali`, `sizes`, `stock`, `low stock`, `kurta`, `human`,
+and Hinglish: `mera order UT1003 kab aayega? last 4 digits 0003`.
 
 ## 7. The web app (chat + live dashboard)
 ```bash
 python3 app/server.py
 ```
-Open **http://localhost:8501** – chat on the left (with one-tap buttons), live numbers from the database
-on the right (orders, tickets, low stock, purchase orders), refreshed every 10 s. Stop with Ctrl+C.
+Open **http://localhost:8501** – **💬 Chat** (customer view, 👍/👎 on answers) and **📊 Ops HQ** (manager view: KPIs,
+escalations, low stock, live order feed, approve/reject purchase orders). Stop with Ctrl+C.
+Public link for a demo: `bash scripts/share_demo.sh` (see `docs/DEPLOY.md`).
 
 ## 8. Evaluation and KPIs for the report
 ```bash
-python3 scripts/evaluate.py                  # 14 test questions -> score -> docs/evaluation_results.md
+python3 scripts/evaluate.py                  # 17 tests, keywords + database + AI judge -> docs/evaluation_results.md
 python3 scripts/kpi_report.py                # business KPIs -> docs/kpi_report.md
 ```
 Copy both tables into `docs/report.md` (sections 6 and 7) and take screenshots of the app.
@@ -74,4 +80,5 @@ Then workflow 03 -> double-click *Public Chat (UrbanThread)*: the Chat URL now s
 
 ## 10. Part B (optional) – real notifications
 Replace the placeholder Slack / Twilio / SMTP credentials in n8n with real ones, set the Twilio *From*
-number (04, 05) and e-mail addresses (04), then publish 04, 05 and 06 again.
+number (04, 05) and e-mail addresses (04), then publish 04, 05, 06 and 07 again. For approval links that work from your phone, set N8N_PUBLIC_URL in .env
+and run `python3 scripts/import_to_n8n.py --publish` again.

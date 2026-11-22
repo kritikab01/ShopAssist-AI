@@ -32,7 +32,7 @@ if (ROOT / ".env").exists():
 N8N = (ENV.get("N8N_URL") or "http://localhost:5679").rstrip("/")
 OLL = (ENV.get("OLLAMA_URL") or "http://localhost:11434").rstrip("/")
 H = {"X-N8N-API-KEY": ENV.get("N8N_API_KEY", ""), "Accept": "application/json"}
-QUESTION = " ".join(sys.argv[1:]) or "Where is my order UT1002?"
+QUESTION = " ".join(sys.argv[1:]) or "Where is my order UT1002? My phone number ends with 0002."
 
 
 def http(method, url, body=None, headers=None, timeout=300):

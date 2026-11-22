@@ -80,3 +80,53 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
     status      VARCHAR(20) NOT NULL DEFAULT 'pending_approval',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ---------------------------------------------------------------------------------------------
+-- v2 upgrades (safe to run on an existing database: everything is "IF NOT EXISTS")
+-- ---------------------------------------------------------------------------------------------
+
+-- 6) VERIFICATION ATTEMPTS: order_lookup only shows an order when the customer also gives the last 4 digits
+--    of the phone number on that order. Every check is logged; 5 wrong tries in 15 minutes lock the order
+--    for the chat (stops someone from guessing 0000-9999).
+CREATE TABLE IF NOT EXISTS verification_attempts (
+    id         SERIAL PRIMARY KEY,
+    order_id   VARCHAR(10) NOT NULL,
+    success    BOOLEAN     NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_verif_order_time ON verification_attempts (order_id, created_at);
+
+-- 7) ORDER EVENTS: status history of every order (written by the order-update webhook, workflow 05).
+--    Gives the dashboard a live activity feed and makes "when did it get delayed?" answerable.
+CREATE TABLE IF NOT EXISTS order_events (
+    id         SERIAL PRIMARY KEY,
+    order_id   VARCHAR(10) NOT NULL REFERENCES orders(order_id),
+    status     VARCHAR(20) NOT NULL,
+    note       TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_order_events_order ON order_events (order_id, created_at);
+
+-- 8) CHAT FEEDBACK: thumbs up / down on each AI answer in the web app -> CSAT KPI.
+CREATE TABLE IF NOT EXISTS chat_feedback (
+    id         SERIAL PRIMARY KEY,
+    session_id VARCHAR(255),
+    rating     SMALLINT    NOT NULL CHECK (rating IN (-1, 1)),
+    question   TEXT,
+    answer     TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Tickets: when a human closes a ticket we keep the time -> "average resolution time" KPI.
+ALTER TABLE tickets ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+ALTER TABLE tickets ADD COLUMN IF NOT EXISTS language VARCHAR(10) DEFAULT 'en';
+
+-- Purchase orders: one-click approval (workflow 07). Each PO gets a random secret token that is only put in
+-- the manager's Slack message / dashboard, so a guessed link cannot approve anything.
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS approval_token VARCHAR(32) NOT NULL DEFAULT md5(random()::text || clock_timestamp()::text);
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS decided_at TIMESTAMPTZ;
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS decided_by VARCHAR(60);
+
+-- Cloud version (render.yaml): n8n keeps its own tables (workflows, credentials, executions) in this separate
+-- schema of the same free Supabase database, so they never mix with the store's tables.
+CREATE SCHEMA IF NOT EXISTS n8n;

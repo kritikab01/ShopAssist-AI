@@ -1,0 +1,11 @@
+[tool.ruff]
+line-length = 130
+target-version = "py310"
+
+[tool.ruff.lint]
+# pyflakes (F) + pycodestyle errors (E); long generated SQL / prompt strings are allowed
+select = ["E", "F"]
+ignore = ["E501", "E701", "E702"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

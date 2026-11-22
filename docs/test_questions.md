@@ -8,9 +8,9 @@ memory from earlier tests does not interfere. Record the result and a screenshot
 |---|------|------------------|------------------|--------------------|-------|
 | 1 | FAQ answer | "What is your return policy?" | `faq_knowledge` | 15 days from delivery; unused with tags; innerwear/Final Sale not returnable; free reverse pickup. Ends with *(Source: Store FAQ)*. | |
 | 2 | Website answer | "Is there any Diwali discount code?" | `website_knowledge` | Mentions **DIWALI25**: 25% off above Rs 2,499, 20 Oct – 5 Nov 2026; one coupon per order. Cites the offers page URL. | |
-| 3 | Order lookup | "Where is my order UT1002?" | `order_lookup` | Status *shipped*, Delhivery, tracking DL55500112, expected 11 Oct 2026. *(Source: order database)* | |
-| 4 | Combined | "My order UT1005 is a shirt that doesn't fit. Can I return it and how long will the refund take?" | `order_lookup` + `faq_knowledge` | Order is *out_for_delivery* → can return within 15 days **after delivery**; prepaid (NetBanking) refund 5–7 business days after QC; also mentions free size exchange. Cites both sources. | |
-| 5 | Missing order ID | "When will my order arrive?" | none | Asks for the order ID (e.g. UT1001) or phone number. Does **not** guess or call `order_lookup`. | |
+| 3 | Order lookup (verified) | "Where is my order UT1002? My phone number ends with 0002." | `order_lookup` | Identity verified → status *shipped*, Delhivery, tracking DL55500112, expected 11 Oct 2026. *(Source: order database)* | |
+| 4 | Combined | "My order UT1005 (phone ending 0005) is a shirt that doesn't fit. Can I return it and how long will the refund take?" | `order_lookup` + `faq_knowledge` | Order is *out_for_delivery* → can return within 15 days **after delivery**; prepaid (NetBanking) refund 5–7 business days after QC; also mentions free size exchange. Cites both sources. | |
+| 5 | Missing order ID | "When will my order arrive?" | none | Asks for the order ID (e.g. UT1001) and the last 4 digits of the phone number. Does **not** guess or call `order_lookup`. | |
 | 6 | Angry customer → escalation | "This is the THIRD time I'm asking! My jeans UT1003 are late and nobody replies. Worst service ever, I want to talk to a manager." (give name *Rohan*, phone *+919000000003* if asked) | `order_lookup`, `escalate_to_human` | Apologises, shows delay status, calls escalation. Replies with ticket ID like **TKT-0001**. Check: new row in `tickets` (priority *high*, sentiment *angry*), Slack message in `#support-escalations`, SMS (if number verified), e-mail to support inbox. | |
 | 7 | Out of scope | "Can you write me a Python script to sort a list?" | none | Politely says it can only help with UrbanThread orders and policies. **No** escalation. | |
 | 8 | Refund over limit | "I returned order UT1004, please refund me now." | `order_lookup`, `escalate_to_human` | Finds amount Rs 7,499 (> Rs 5,000) → explains it needs manual approval, escalates, gives ticket ID. Ticket `issue_type` = *refund*, priority *high*. | |
@@ -19,14 +19,17 @@ memory from earlier tests does not interfere. Record the result and a screenshot
 
 | # | Type | Message | Expected tool(s) | Expected behaviour | Pass? |
 |---|------|---------|------------------|--------------------|-------|
-| 9 | One word: order ID | "UT1003" | `order_lookup` | Status *delayed*, Ekart, new date. | |
+| 9 | One word: order ID | "UT1003" | `order_lookup` | **Asks for the last 4 digits of the phone** and shows nothing yet. Then send "0003" → status *delayed*, Ekart, history. | |
 | 10 | One word: topic | "returns" | `faq_knowledge` | 15-day return policy in 2–3 lines. | |
 | 11 | One word: offer | "diwali" | `website_knowledge` | DIWALI25, 25% off above Rs 2,499. | |
 | 12 | Inventory: customer | "Is the linen kurta available in size M?" | `inventory_expert` → `stock_lookup` | "In stock" (no exact numbers or supplier shown to customers). | |
 | 13 | Inventory: manager | "Which products are low on stock?" | `inventory_expert` → `stock_lookup` | Lists TSH-BAS-L, JNS-RLX-28, KUR-LIN-S, PLZ-COT-S, HOD-OVR-XL with stock and reorder level. | |
 | 14 | Inventory: purchase order | "Please restock the Basics Cotton T-shirt size L" | `inventory_expert` → `create_purchase_order` | New **PO-000N**, 35 units, Tiruppur Knits, ≈ Rs 6,300, status *pending_approval*; Slack approval message. | |
+| 15 | Privacy: wrong digits | "Where is my order UT1002? My phone ends with 9999." | `order_lookup` | Digits do not match → **no order details**; asks to check the number or offers a human. After 5 wrong tries in 15 min the order is locked for the chat. | |
+| 16 | Hinglish | "mera order UT1003 kab aayega? phone ke last 4 digits 0003" | `order_lookup` | Replies in Hinglish: order *delayed* (Ekart). | |
+| 17 | Sarcasm → escalation | "Wow, amazing service 🙄 UT1003 is STILL not here after 3 weeks. Thanks a lot." | `escalate_to_human` | Sarcasm detected as anger → ticket ID **TKT-000N**. | |
 
-Run all 14 automatically: `python3 scripts/evaluate.py` (results in `docs/evaluation_results.md`).
+Run all 17 automatically: `python3 scripts/evaluate.py` (results in `docs/evaluation_results.md`).
 
 ## Webhook test (workflow 05)
 
@@ -38,7 +41,7 @@ curl -X POST https://YOUR-N8N.app.n8n.cloud/webhook/order-update \
 
 Expected: `{"ok":true,"order_id":"UT1002","status":"delayed","sms_sent":true,...}`, the `orders` row is
 updated, and the customer phone gets a delay SMS. Then ask the chat *"Where is my order UT1002?"* –
-the agent should now say **delayed**, new date 15 Oct 2026.
+(phone ending 0002) – the agent should now say **delayed**, new date 15 Oct 2026, and a new row appears in `order_events`.
 
 Unknown order: `{"order_id":"UT9999","status":"shipped"}` → `{"ok":false,"message":"Order not found"}`.
 

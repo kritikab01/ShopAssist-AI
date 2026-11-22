@@ -13,7 +13,6 @@ Then it prints a short "what to do" list. Paste the whole output into the chat i
 """
 import datetime
 import json
-import os
 import socket
 import subprocess
 import urllib.error
@@ -173,11 +172,18 @@ else:
         dim = r.get("dimension")
         st2, s2 = http("POST", f"https://{r['host']}/describe_index_stats", PH, {})
         n = s2.get("totalVectorCount", s2.get("total_vector_count", 0)) if st2 == 200 else "?"
-        print(f"   index dimension {dim} (need 768), vectors stored: {n}  (~6 after workflow 01, more after 02)")
+        ns = {k: (v.get("vectorCount", v.get("vector_count", 0))) for k, v in (s2.get("namespaces") or {}).items()} \
+            if st2 == 200 else {}
+        print(f"   index dimension {dim} (need 768), vectors stored: {n}  "
+              f"(namespaces: faq={ns.get('faq', 0)}, website={ns.get('website', 0)})")
         if dim != 768:
             todo.append("Pinecone index has the wrong size:  python3 scripts/setup_pinecone.py  (makes it 768)")
-        elif n == 0:
-            todo.append("Knowledge base is EMPTY: in n8n run workflow 01, then 02 (Execute workflow) - FAQ and offers come from there")
+        elif not ns.get("faq") or not ns.get("website"):
+            todo.append("Knowledge base is EMPTY: in n8n run workflow 01, then 02 (Execute workflow) - FAQ and offers come from there "
+                        "(re-running them is safe now: each one replaces its own namespace)")
+        if ns.get(""):
+            print(f"   note: {ns['']} old vectors from the first version are in the default namespace (no longer used). "
+                  "Remove them: python3 scripts/setup_pinecone.py --clean-old")
 
 # ------------------------------------------------------------------ 4. n8n
 print("\n4) n8n")
@@ -199,7 +205,7 @@ elif st != 200:
 else:
     names, updated = {}, {}
     for w in wfs.get("data", []):
-        if w["name"][:3] not in ("01 ", "02 ", "03 ", "04 ", "05 ", "06 "):
+        if w["name"][:3] not in ("01 ", "02 ", "03 ", "04 ", "05 ", "06 ", "07 "):
             continue
         names[w["id"]] = w["name"]
         updated[w["id"]] = str(w.get("updatedAt") or "")
@@ -211,8 +217,8 @@ else:
         missing = [n["name"] for n in w["nodes"] if not n.get("credentials") and n["type"].split(".")[-1] in
                    ("vectorStorePinecone", "embeddingsOllama", "lmChatOllama", "postgres", "postgresTool",
                     "memoryPostgresChat", "slack", "twilio", "emailSend")]
-        if not w.get("active") and w["name"][:2] in ("03", "04", "05", "06"):
-            todo.append(f"Publish workflow {w['name'][:2]} in n8n (order: 04, 06, then 03, 05)")
+        if not w.get("active") and w["name"][:2] in ("03", "04", "05", "06", "07"):
+            todo.append(f"Publish workflow {w['name'][:2]} in n8n (order: 04, 06, then 03, 05, 07)")
         print(f"   {w['name'][:44]:44} AI={ai:13} {'published' if w.get('active') else 'not published':13}"
               f"{' missing credential: ' + ', '.join(missing) if missing else ''}")
     st, creds = http("GET", f"{n8n}/api/v1/credentials?limit=100", H)

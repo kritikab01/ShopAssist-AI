@@ -37,9 +37,9 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE orders\nSET status = LOWER($2),\n    expected_delivery = COALESCE(NULLIF($3, '')::date, expected_delivery),\n    updated_at = now()\nWHERE order_id = UPPER($1)\nRETURNING order_id, customer_name, phone, status, expected_delivery;",
+        "query": "WITH u AS (\n  UPDATE orders\n  SET status = LOWER($2),\n      expected_delivery = COALESCE(NULLIF($3, '')::date, expected_delivery),\n      updated_at = now()\n  WHERE order_id = UPPER($1)\n  RETURNING order_id, customer_name, phone, status, expected_delivery\n), e AS (  -- status history for the timeline / dashboard\n  INSERT INTO order_events (order_id, status, note)\n  SELECT order_id, status, COALESCE(NULLIF($4, ''), 'Status update from the store system') FROM u\n)\nSELECT * FROM u;",
         "options": {
-          "queryReplacement": "={{ [ $json.body.order_id, $json.body.status, $json.body.new_expected_delivery || '' ] }}"
+          "queryReplacement": "={{ [ $json.body.order_id, $json.body.status, $json.body.new_expected_delivery || '', $json.body.note || '' ] }}"
         }
       },
       "id": "9afb0151-29ae-5e96-9076-57d0c0f4d0cb",

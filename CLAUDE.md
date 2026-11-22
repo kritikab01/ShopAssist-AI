@@ -10,7 +10,7 @@ Capstone project: n8n customer-support agent for a fictional store (UrbanThread)
 - Pinecone index `shopassist` must be **768** dims, cosine (`scripts/setup_pinecone.py`).
 - Workflow JSON is GENERATED: edit `scripts/build_workflows.py` (and `prompts/`), then run
   `python3 scripts/build_workflows.py`. Never hand-edit `workflows/*.json`.
-- `scripts/import_to_n8n.py` creates/updates the 5 workflows via the n8n API (by name), keeps chosen
+- `scripts/import_to_n8n.py` creates/updates the 7 workflows (`--publish` activates 04,06,07,03,05; `--cloud` uses workflows/cloud) via the n8n API (by name), keeps chosen
   credentials, auto-assigns the only credential of each type, creates the Ollama credential (tests
   localhost then host.docker.internal) and placeholder Slack/Twilio/SMTP credentials (n8n 2.x will not
   publish a workflow with a node lacking a credential), and links 03 -> 04.
@@ -39,6 +39,17 @@ Capstone project: n8n customer-support agent for a fictional store (UrbanThread)
   order_lookup (Postgres), escalate_to_human -> published 04 -> TKT id; chat memory rows saved; 05 webhook.
 - Ollama options that matter: numCtx 8192 (default 2048 truncates the agent prompt), think false.
 - Not verifiable in the cloud sandbox: real model answer quality, real Pinecone calls.
+
+## v2 (Nov 2026, branch claude/beautiful-einstein-hj0ew5)
+- order_lookup = order ID + last 4 phone digits, verification_attempts lockout (5/15 min); fallback reply never leaks.
+- Pinecone namespaces faq / website with clearNamespace (embeddingBatchSize 5000 so it clears once).
+- Detect Intent lives in prompts/detect_intent.js (Hindi/Hinglish, sarcasm, caps); tickets.language.
+- Workflow 07 PO approval: GET po-review (read-only) / POST po-decision (token). 06 posts review links
+  (__N8N_PUBLIC_URL__ replaced by import). 05 writes order_events.
+- build_workflows.py writes workflows/ (Ollama) AND workflows/cloud/ (Groq + Cohere, index shopassist-cloud 1024).
+- tests/ (pytest, 58) + .github/workflows/ci.yml; docker-compose.yml + scripts/up.sh; scripts/share_demo.sh;
+  render.yaml; docs/DEPLOY.md; docs/INTERVIEW_NOTES.md. App redesigned (Chat + Ops HQ, ADMIN_KEY, rate limit).
+- Verified on n8n 2.48.7 (needs Node 24) + Postgres 16: all 7 publish; 07 loop; 05 history; 03 fallback path.
 
 ## Next steps for the user
 Follow docs/RUNBOOK.md (setup_database -> import -> doctor -> run 01, 02 -> publish 04, 06, 03, 05 ->

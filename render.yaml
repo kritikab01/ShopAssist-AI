@@ -1,0 +1,73 @@
+# Render Blueprint - ShopAssist in the cloud (free plans). Render dashboard -> New -> Blueprint -> this repo.
+# Full steps: docs/DEPLOY.md. Values marked sync: false are asked for once in the Render dashboard.
+#   shopassist-n8n  n8n 2.48; its own data (workflows, credentials) lives in Supabase, schema "n8n",
+#                   so nothing is lost when the free instance sleeps or restarts.
+#   shopassist-app  the ShopAssist web app (chat + manager dashboard), talks to n8n and Supabase.
+# AI in the cloud: Groq (chat) + Cohere (embeddings) - import with  python3 scripts/import_to_n8n.py --cloud --publish
+services:
+  - type: web
+    name: shopassist-n8n
+    runtime: image
+    image:
+      url: docker.n8n.io/n8nio/n8n:2.48.7
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: PORT
+        value: "5678"
+      - key: N8N_PORT
+        value: "5678"
+      - key: N8N_PROTOCOL
+        value: https
+      - key: N8N_PROXY_HOPS
+        value: "1"
+      - key: WEBHOOK_URL            # https://shopassist-n8n.onrender.com/  (your service URL, with the slash)
+        sync: false
+      - key: N8N_ENCRYPTION_KEY     # encrypts the credentials stored in the database - keep it forever
+        generateValue: true
+      - key: GENERIC_TIMEZONE
+        value: Asia/Kolkata
+      - key: N8N_DIAGNOSTICS_ENABLED
+        value: "false"
+      - key: DB_TYPE
+        value: postgresdb
+      - key: DB_POSTGRESDB_SCHEMA
+        value: n8n
+      - key: DB_POSTGRESDB_HOST     # Supabase -> Connect -> Session pooler host
+        sync: false
+      - key: DB_POSTGRESDB_PORT
+        value: "5432"
+      - key: DB_POSTGRESDB_DATABASE
+        value: postgres
+      - key: DB_POSTGRESDB_USER     # postgres.<project-ref>
+        sync: false
+      - key: DB_POSTGRESDB_PASSWORD
+        sync: false
+      - key: DB_POSTGRESDB_SSL_ENABLED
+        value: "true"
+      - key: DB_POSTGRESDB_SSL_REJECT_UNAUTHORIZED
+        value: "false"
+
+  - type: web
+    name: shopassist-app
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: N8N_URL                # https://shopassist-n8n.onrender.com  (no slash)
+        sync: false
+      - key: POSTGRES_HOST
+        sync: false
+      - key: POSTGRES_PORT
+        value: "5432"
+      - key: POSTGRES_DB
+        value: postgres
+      - key: POSTGRES_USER
+        sync: false
+      - key: POSTGRES_PASSWORD
+        sync: false
+      - key: POSTGRES_SSL
+        value: require
+      - key: ADMIN_KEY              # the manager dashboard asks for this key (see Environment tab)
+        generateValue: true

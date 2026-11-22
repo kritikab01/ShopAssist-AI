@@ -1,7 +1,7 @@
 # ShopAssist-AI: An Agentic RAG Customer-Support Assistant for an Online Clothing Store
 
 **Course:** Agentic AI for Business Automation – Individual Capstone
-**Student:** _<your name>_ · **Roll no.:** _<roll no.>_ · **Date:** _<submission date>_
+**Student:** Kritika Bhachawat · **Roll no.:** 065087 · PGDM (Business Data Analytics) 2025–27, FORE School of Management, New Delhi · **Submitted:** 10 October 2026 · **v2 update:** November 2026
 **Repository:** https://github.com/kritikab01/ShopAssist-AI
 
 > All company, customer and order data in this project is fictional.
@@ -154,13 +154,17 @@ MacBook Air, run on 11 Oct 2026). Before the guardrails were added the score was
 
 \* passed the automatic check, but a human reading found a wrong detail (see observations).
 
-**Screenshots** (add to `docs/screenshots/` and link here):
+**Screenshots** (all in `docs/screenshots/`):
 
-- [ ] Fig 1 – Workflow 01 canvas · [ ] Fig 2 – Workflow 02 canvas and a summary
-- [ ] Fig 3 – Workflow 03 canvas · [ ] Fig 4 – Public chat conversation (tests 1–4)
-- [ ] Fig 5 – Escalation: chat reply with ticket ID · [ ] Fig 6 – Slack alert
-- [ ] Fig 7 – SMS received · [ ] Fig 8 – Escalation e-mail · [ ] Fig 9 – `tickets` table in Supabase
-- [ ] Fig 10 – Webhook test response · [ ] Fig 11 – Pinecone index with metadata
+| Fig | What | File |
+|---|---|---|
+| 1 | Architecture | [architecture.png](screenshots/architecture.png) |
+| 2–8 | Workflow canvases 01–07 | [wf01](screenshots/wf01.png) · [wf02](screenshots/wf02.png) · [wf03](screenshots/wf03.png) · [wf04](screenshots/wf04.png) · [wf05](screenshots/wf05.png) · [wf06](screenshots/wf06.png) · [wf07](screenshots/wf07.png) |
+| 9 | Escalation run (chat → ticket) | [exec03_escalation.png](screenshots/exec03_escalation.png) |
+| 10 | Inventory Agent drafting a purchase order | [exec06_po.png](screenshots/exec06_po.png) |
+| 11 | Web app: customer chat | [app_chat.png](screenshots/app_chat.png) · [app_mobile_dark.png](screenshots/app_mobile_dark.png) |
+| 12 | Web app: Ops HQ manager dashboard | [app_ops.png](screenshots/app_ops.png) |
+| 13 | Purchase-order review page (workflow 07) | [po_review.png](screenshots/po_review.png) |
 
 **Observations:**
 
@@ -210,27 +214,49 @@ Orders: 10 worth Rs 30,285 (3 shipped, 2 delivered, 1 delayed, 1 out for deliver
 1 cancelled). The numbers come from repeated testing, not real customers. In live use, the "resolved without a
 human" share is the main KPI: about 4 in 5 conversations needed no staff time.
 
+## 6b. Version 2 (November 2026): closing the gaps
+
+After submission, every limitation that an interviewer or reviewer would spot was fixed:
+
+| Gap in v1 | What v2 does | Where |
+|---|---|---|
+| Anyone with an order ID could see the order | **Identity check**: order ID + last 4 digits of the phone; every check logged; 5 wrong tries in 15 min lock the order. The fallback reply never shows unverified details. | `order_lookup` SQL (03), `verification_attempts` |
+| Re-running ingestion duplicated vectors | One Pinecone **namespace per knowledge base** (`faq`, `website`), emptied and refilled on every run | 01, 02, 03 |
+| English only; sarcasm missed | **Hindi / Hinglish** detection and replies; sarcasm, ALL CAPS and "!!!" count as anger | `prompts/detect_intent.js` |
+| PO approval was only a Slack message | **Workflow 07**: secret-token review link → Approve / Reject (POST) → Slack + supplier SMS; also from the dashboard | 06, 07, web app |
+| Keyword-only evaluation | **AI judge** (1–5, flags invented facts) + **live-database fact check**; 17 tests incl. privacy, Hinglish, sarcasm | `scripts/evaluate.py` |
+| No automated tests | **58 pytest tests** + **GitHub Actions CI** (lint, generated-file check, Node-run guardrails, every SQL query on Postgres 16) | `tests/`, `.github/workflows/ci.yml` |
+| ~60 min manual setup | **One command**: `bash scripts/up.sh` (Docker Compose: Postgres + n8n + app) | `docker-compose.yml` |
+| Only on the laptop | **Public demo link** (Cloudflare tunnel) and a **cloud version** (Render + Groq + Cohere) | `docs/DEPLOY.md`, `render.yaml` |
+| Basic dashboard | Redesigned app: chat with order/ticket/coupon badges, 👍/👎 feedback (CSAT), **Ops HQ** with PO approvals, live order feed, identity-check stats; admin key + rate limit for public use | `app/` |
+
+New tables: `verification_attempts`, `order_events` (status history), `chat_feedback`; new columns for ticket language
+/ resolution time and PO approval. All changes are additive, so the v1 database upgrades with `setup_database.py`.
+
+Verified in a sandbox on **n8n 2.48.7 + Postgres 16**: all 7 workflows import and publish; the PO approval loop
+(review page, wrong token, approve, double-approve); the order webhook history; and, with the AI model switched off,
+the deterministic safety net still answered verified orders, refused wrong digits, and created tickets for a
+refund above Rs 5,000 and for an angry Hinglish message (reply and ticket in Hinglish).
+
 ## 7. Limitations
 
 - Fictional data and small knowledge base (1 PDF, 4 pages); real stores need regular re-ingestion.
-- Re-running ingestion creates duplicate vectors (no upsert by document ID).
-- Public chat has no login: anyone who knows an order ID can see its status (production needs OTP verification).
-- Sentiment / anger detection depends on the LLM and may miss sarcasm or Hinglish.
+- Identity check uses the last 4 phone digits (plus lockout), not a real OTP by SMS; production should send an OTP.
+- Anger, sarcasm and Hinglish detection are rule-based (word lists); unusual phrasing can still be missed.
 - Twilio trial sends only to verified numbers and adds a trial prefix to messages.
-- The automatic evaluation checks for expected facts (keywords), not full answer quality.
+- The AI judge is itself a model and can be wrong; the 17 tests are a small sample.
 - A small local model (3B parameters) is slower and makes more mistakes than large cloud models; answers depend on the laptop's speed.
-- The chat works only while the computer, n8n and Ollama are running (self-hosted).
-- English only.
+- The local version works only while the computer is on; the free cloud version sleeps after 15 minutes idle.
+- English, Hindi and Hinglish only; the local embedding model is English-first (the cloud version uses multilingual embeddings).
 
 ## 8. Future scope
 
-1. **Approval loop for purchase orders:** a Slack button that approves the PO, updates its status and texts
-   the supplier via Twilio (today the Inventory Agent drafts the PO and asks for approval in Slack).
+1. **Real OTP by SMS** (Twilio Verify) instead of the last-4-digits check.
 2. **Flowise version:** rebuild the same agent in Flowise to compare low-code agent builders.
 3. **Bigger or cloud models:** compare the local `qwen2.5:3b` with `qwen2.5:7b` or a hosted model (Gemini, GPT) for answer quality and speed.
-4. WhatsApp channel via Twilio WhatsApp API; Hindi and Hinglish support.
-5. OTP verification before showing order details; automatic re-scraping on a schedule.
-6. Dashboard of ticket volume, sentiment and resolution time.
+4. WhatsApp channel via the Twilio WhatsApp API.
+5. Automatic re-scraping on a schedule (safe now that ingestion replaces its namespace).
+6. Ticket resolution workflow for staff (close ticket → `resolved_at` → resolution-time KPI).
 
 ## 9. Conclusion
 

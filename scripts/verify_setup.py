@@ -14,7 +14,6 @@ It changes NOTHING: no credentials are created or edited, no workflow is run, pu
 Supabase check needs a small pure-Python driver once:  pip3 install pg8000
 """
 import json
-import os
 import ssl
 import sys
 import urllib.error

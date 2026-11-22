@@ -8,6 +8,13 @@ Run on your own computer, in the repo folder (reads PINECONE_API_KEY from .env):
 - index exists, size 768   -> nothing to do
 - index exists, other size -> asks "type DELETE" before deleting and recreating it
   (an index's dimension can never be changed; the old vectors are useless anyway)
+
+    python3 scripts/setup_pinecone.py --cloud        # index "shopassist-cloud", 1024 dims (Cohere, cloud version)
+    python3 scripts/setup_pinecone.py --clean-old
+
+removes the vectors that the first version stored in the default namespace. Since v2 the FAQ lives in
+namespace "faq" and the web pages in "website"; workflows 01/02 empty and refill their own namespace on every
+run, so re-running them never creates duplicates.
 Never prints your API key.
 """
 import json
@@ -19,6 +26,9 @@ import urllib.request
 from pathlib import Path
 
 DIMENSION, METRIC = 768, "cosine"
+CLOUD = "--cloud" in sys.argv  # cloud profile: Cohere embed-multilingual-v3.0 -> 1024 dims, index shopassist-cloud
+if CLOUD:
+    DIMENSION = 1024
 ROOT = Path(__file__).resolve().parent.parent
 
 # Prefer IPv4 (some Wi-Fi networks hang on IPv6).
@@ -32,7 +42,7 @@ if (ROOT / ".env").exists():
             k, v = line.split("=", 1)
             env[k.strip()] = v.split(" #")[0].strip().strip('"').strip("'")
 key = env.get("PINECONE_API_KEY", "")
-name = env.get("PINECONE_INDEX") or "shopassist"
+name = "shopassist-cloud" if CLOUD else (env.get("PINECONE_INDEX") or "shopassist")
 if not key or "REPLACE_ME" in key:
     sys.exit("PINECONE_API_KEY missing in .env (app.pinecone.io -> API Keys).")
 H = {"Api-Key": key, "X-Pinecone-API-Version": "2025-01", "Content-Type": "application/json"}
@@ -61,6 +71,17 @@ def message(r):
 
 
 st, idx = call("GET", f"/indexes/{name}")
+if "--clean-old" in sys.argv:
+    if st != 200:
+        sys.exit(f"Index '{name}' not found (HTTP {st}).")
+    req = urllib.request.Request(f"https://{idx['host']}/vectors/delete", method="POST", headers=H,
+                                 data=json.dumps({"deleteAll": True, "namespace": ""}).encode())
+    try:
+        urllib.request.urlopen(req, timeout=30).read()
+        print("Old vectors in the default namespace removed. The 'faq' and 'website' namespaces are untouched.")
+    except urllib.error.HTTPError as e:
+        print("Nothing to remove." if e.code == 404 else f"Pinecone error HTTP {e.code}: {e.read().decode()[:200]}")
+    sys.exit(0)
 if st == 401:
     sys.exit("Pinecone says the API key is invalid. Copy it again from app.pinecone.io -> API Keys into .env.")
 if st == 200:
@@ -68,7 +89,7 @@ if st == 200:
         print(f"OK: index '{name}' already has dimension {DIMENSION} and metric {METRIC}. Nothing to do.")
         sys.exit(0)
     print(f"Index '{name}' has dimension {idx.get('dimension')} / metric {idx.get('metric')}, "
-          f"but Ollama's nomic-embed-text needs {DIMENSION} / {METRIC}.")
+          f"but the embedding model needs {DIMENSION} / {METRIC}.")
     if input("Type DELETE to delete it and create it again with the right size: ").strip() != "DELETE":
         sys.exit("Nothing changed.")
     st, r = call("DELETE", f"/indexes/{name}")
@@ -92,7 +113,7 @@ print(f"Creating '{name}' ({DIMENSION} dims, {METRIC}) ...")
 for _ in range(60):
     st, idx = call("GET", f"/indexes/{name}")
     if st == 200 and (idx.get("status") or {}).get("ready"):
-        print(f"OK: index '{name}' is ready. Now run workflow 01, then 02, in n8n (once each).")
+        print(f"OK: index '{name}' is ready. Now run workflow 01, then 02, in n8n (safe to re-run).")
         sys.exit(0)
     time.sleep(2)
 print("The index was created but is not ready yet - wait a minute, then run workflow 01.")

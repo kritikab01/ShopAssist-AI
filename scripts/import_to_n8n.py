@@ -1,4 +1,4 @@
-"""Create or update all 5 ShopAssist workflows in your n8n with one command (n8n public API).
+"""Create or update all 7 ShopAssist workflows in your n8n with one command (n8n public API).
 
 Run this ON YOUR OWN COMPUTER (where n8n runs), from the repo folder:
 
@@ -6,7 +6,7 @@ Run this ON YOUR OWN COMPUTER (where n8n runs), from the repo folder:
     python3 scripts/import_to_n8n.py     # reads N8N_URL / N8N_API_KEY / OLLAMA_URL from .env
 
 What it does:
-  1. workflow 04 (escalation) and 06 (inventory agent) first, then 03, 01, 02, 05;
+  1. workflow 04 (escalation) and 06 (inventory agent) first, then 03, 01, 02, 05, 07;
   2. if a workflow with the same name already exists it is UPDATED in place (same ID, same URL)
      and every node keeps the credential you already selected (matched by node name);
      otherwise it is created;
@@ -14,8 +14,13 @@ What it does:
      published) if they do not exist; nodes with no credential get your credential of the right
      type if you have exactly one of it;
   4. points the tools of workflow 03 at the real IDs: escalate_to_human -> 04, inventory_expert -> 06.
-Nothing is published/activated. Nodes that never had a credential show a warning: open them and
-select your credential. Only the Python 3 standard library is used - no pip install needed.
+Nodes that never had a credential show a warning: open them and select your credential.
+Only the Python 3 standard library is used - no pip install needed.
+
+Options:
+    --publish   also publish (activate) 04, 06, 07, 03, 05 in that order (sub-workflows before the agent)
+    --cloud     import workflows/cloud/ (Groq chat + Cohere embeddings) and create the Groq / Cohere
+                credentials from GROQ_API_KEY / COHERE_API_KEY in .env - for a hosted n8n without Ollama
 """
 import json
 import os
@@ -24,9 +29,12 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-WF_DIR = Path(__file__).resolve().parent.parent / "workflows"
+CLOUD = "--cloud" in sys.argv
+PUBLISH = "--publish" in sys.argv
+WF_DIR = Path(__file__).resolve().parent.parent / "workflows" / ("cloud" if CLOUD else "")
 ORDER = ["04_escalation_subworkflow.json", "06_inventory_agent.json", "03_support_agent_chat.json",
-         "01_ingest_faq_pdf.json", "02_scrape_and_summarize.json", "05_order_update_webhook.json"]
+         "01_ingest_faq_pdf.json", "02_scrape_and_summarize.json", "05_order_update_webhook.json",
+         "07_po_approval.json"]
 # Agent tools in 03 that call another workflow: tool node name -> workflow file it must point to.
 LINKS = {"escalate_to_human": "04_escalation_subworkflow.json", "Create Ticket (workflow 04)": "04_escalation_subworkflow.json", "inventory_expert": "06_inventory_agent.json"}
 
@@ -39,6 +47,8 @@ if _env.exists():
             os.environ.setdefault(_k.strip(), _v.split(" #")[0].strip().strip('"').strip("'"))
 
 base = os.environ.get("N8N_URL", "http://localhost:5679").rstrip("/")
+# Address of n8n for people's browsers (approval links in Slack): a tunnel or cloud URL if you have one.
+public = (os.environ.get("N8N_PUBLIC_URL") or base).rstrip("/")
 key = os.environ.get("N8N_API_KEY")
 if not key:
     sys.exit("Set N8N_API_KEY first (n8n -> Settings -> n8n API -> Create an API key).")
@@ -77,7 +87,7 @@ while True:
 
 # Credential type each node needs. If you have exactly ONE credential of that type in n8n,
 # nodes without a credential get it automatically (no clicking through every node).
-NEEDS = {"vectorStorePinecone": "pineconeApi", "embeddingsOllama": "ollamaApi", "lmChatOllama": "ollamaApi",
+NEEDS = {"lmChatGroq": "groqApi", "embeddingsCohere": "cohereApi", "vectorStorePinecone": "pineconeApi", "embeddingsOllama": "ollamaApi", "lmChatOllama": "ollamaApi",
          "postgres": "postgres", "postgresTool": "postgres",
          "memoryPostgresChat": "postgres", "slack": "slackApi", "twilio": "twilioApi", "emailSend": "smtp"}
 by_type = {}
@@ -103,9 +113,18 @@ def credential_ok(cid):
 
 # Ollama credential: created automatically (no secret needed). n8n installed with npm reaches Ollama at
 # localhost; n8n running in Docker reaches it at host.docker.internal - we test and keep the one that works.
-if "ollamaApi" not in by_type:
+for ctype, var in (("groqApi", "GROQ_API_KEY"), ("cohereApi", "COHERE_API_KEY"), ("pineconeApi", "PINECONE_API_KEY")):
+    if ctype not in by_type and "REPLACE_ME" not in os.environ.get(var, "REPLACE_ME") and (CLOUD or ctype == "pineconeApi"):
+        try:
+            create_credential(f"{ctype[:-3].title()} account", ctype, {"apiKey": os.environ[var]})
+            print(f"created  {ctype} credential from {var} in .env")
+        except ApiError as e:
+            print(f"note: could not create the {ctype} credential ({e})")
+
+if "ollamaApi" not in by_type and not CLOUD:
     try:
-        for url in [os.environ.get("OLLAMA_URL", "http://localhost:11434"), "http://host.docker.internal:11434"]:
+        for url in [u for u in (os.environ.get("OLLAMA_URL_FOR_N8N"), os.environ.get("OLLAMA_URL", "http://localhost:11434"),
+                                "http://host.docker.internal:11434", "http://ollama:11434") if u]:
             cid = create_credential("Ollama account", "ollamaApi", {"baseUrl": url})
             ok = credential_ok(cid)
             if ok is not False:
@@ -117,6 +136,25 @@ if "ollamaApi" not in by_type:
             print("note: n8n cannot reach Ollama. Is the Ollama app running? (ollama.com) Then run this again.")
     except ApiError as e:
         print(f"note: could not create the Ollama credential ({e}); create it in n8n: Credentials -> Ollama.")
+
+# Postgres credential from .env (POSTGRES_*), so you do not have to type it into n8n. POSTGRES_HOST_FOR_N8N
+# overrides the host as n8n sees it (e.g. "postgres" when both run in docker compose).
+if "postgres" not in by_type and "REPLACE_ME" not in os.environ.get("POSTGRES_HOST", "REPLACE_ME") + \
+        os.environ.get("POSTGRES_PASSWORD", "REPLACE_ME"):
+    ssl = (os.environ.get("POSTGRES_SSL") or "require").lower()
+    ssl = "disable" if ssl in ("disable", "false", "0") else "require"
+    try:
+        create_credential("Supabase Postgres", "postgres", {
+            "host": os.environ.get("POSTGRES_HOST_FOR_N8N") or os.environ["POSTGRES_HOST"],
+            "port": int(os.environ.get("POSTGRES_PORT_FOR_N8N") or os.environ.get("POSTGRES_PORT") or 5432),
+            "database": os.environ.get("POSTGRES_DB") or "postgres",
+            "user": os.environ.get("POSTGRES_USER") or "postgres",
+            "password": os.environ["POSTGRES_PASSWORD"],
+            "ssl": ssl, "allowUnauthorizedCerts": ssl == "require", "maxConnections": 10,
+        })
+        print("created  Postgres credential from .env (POSTGRES_*)")
+    except ApiError as e:
+        print(f"note: could not create the Postgres credential ({e}); create it in n8n: Credentials -> Postgres.")
 
 # n8n 2.x refuses to PUBLISH a workflow while any node lacks a credential. Until you set up Slack, Twilio
 # and Gmail (Part B), placeholder credentials let you publish 04/05; those three steps just fail softly.
@@ -140,7 +178,7 @@ for t, cs in by_type.items():
 
 ids = {}  # workflow file -> id in n8n
 for filename in ORDER:
-    wf = json.loads((WF_DIR / filename).read_text(encoding="utf-8"))
+    wf = json.loads((WF_DIR / filename).read_text(encoding="utf-8").replace("__N8N_PUBLIC_URL__", public))
     old = existing.get(wf["name"])
     old_creds = {n["name"]: n["credentials"] for n in (old or {}).get("nodes", []) if n.get("credentials")}
     for node in wf["nodes"]:
@@ -168,4 +206,17 @@ for filename in ORDER:
     ids[filename] = result["id"]
     print(f"{action:8} {result['id']}  {result['name']}")
 
-print(f"\nDone. Open {base}/home/workflows. Check credentials on nodes with a warning, then Save/Publish.")
+if PUBLISH:
+    # Sub-workflows first: n8n checks that a called workflow is published when the caller is published.
+    for filename in ["04_escalation_subworkflow.json", "06_inventory_agent.json", "07_po_approval.json",
+                     "03_support_agent_chat.json", "05_order_update_webhook.json"]:
+        if filename not in ids:
+            continue
+        try:
+            api("POST", f"/workflows/{ids[filename]}/activate")
+            print(f"published {filename[:2]}")
+        except ApiError as e:
+            print(f"NOT published {filename[:2]}: {e}")
+
+print(f"\nDone. Open {base}/home/workflows. Check credentials on nodes with a warning" +
+      ("." if PUBLISH else ", then Publish 04, 06, 07, 03, 05 (or run again with --publish)."))
