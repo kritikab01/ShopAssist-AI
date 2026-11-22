@@ -1,237 +1,200 @@
-# ShopAssist-AI
+<div align="center">
 
-**Agentic RAG customer-support agent for an online clothing store, built with n8n, Ollama (local AI), Pinecone,
-Supabase Postgres, Twilio, Slack and Gmail SMTP.**
+# 🧵 ShopAssist
 
-All services used are free tiers or run locally; no credit card needed.
-(n8n runs self-hosted on your computer; the AI models run locally with Ollama.)
+### The AI support teammate for **UrbanThread**, an Indian online clothing store
 
-Individual capstone – *Agentic AI for Business Automation*.
-All data (brand, customers, orders, phone numbers, policies) is **fictional**.
+*Tracks orders, explains returns, drops coupon codes, checks stock, talks Hinglish,
+and pings a human the second a customer gets upset.*
+
+[![CI](https://github.com/kritikab01/ShopAssist-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/kritikab01/ShopAssist-AI/actions/workflows/ci.yml)
+![n8n](https://img.shields.io/badge/n8n-2.48-ea4b71)
+![AI](https://img.shields.io/badge/AI-Ollama%20local%20%7C%20Groq%20cloud-7c4dff)
+![RAG](https://img.shields.io/badge/RAG-Pinecone-1f2328)
+![DB](https://img.shields.io/badge/DB-Postgres%20%2F%20Supabase-3ecf8e)
+![License](https://img.shields.io/badge/license-MIT-b8f229)
+
+**7 n8n workflows · 2 AI agents · 2 knowledge bases · 58 automated tests · runs for ₹0**
+
+<img src="docs/screenshots/app_chat.png" alt="ShopAssist customer chat: order verified with phone digits, delay shown with status badges, Diwali coupon code" width="100%">
+
+</div>
+
+| 📱 Hinglish, sarcasm, instant escalation | 📊 Ops HQ, the manager's dashboard | ✅ One-tap purchase-order approval |
+|:---:|:---:|:---:|
+| <img src="docs/screenshots/app_mobile_dark.png" width="260" alt="Mobile dark mode: sarcastic complaint gets a ticket"> | <img src="docs/screenshots/app_ops.png" width="330" alt="Ops HQ dashboard: KPIs, purchase orders, escalations, stock, live order feed"> | <img src="docs/screenshots/po_review.png" width="260" alt="Purchase order review page with Approve and Reject"> |
+
+<sub>Screenshots of the real UI. Ops HQ shows test data; chat replies replay answers from the evaluation run. The review page is
+served live by n8n workflow 07. All brands, people, orders and phone numbers are fictional.</sub>
 
 ---
 
-## Submission files
+## The problem → the fix
 
-- **Report (Word):** [`docs/submission/ShopAssist_AI_Capstone_Report.docx`](docs/submission/ShopAssist_AI_Capstone_Report.docx)
-- **Technology Stack Guide (Word):** [`docs/submission/ShopAssist_AI_Tech_Stack_Guide.docx`](docs/submission/ShopAssist_AI_Tech_Stack_Guide.docx)
-- **Screenshots** (architecture, all six workflow canvases, two executions, web app): [`docs/screenshots/`](docs/screenshots/)
-- Markdown version of the report: [`docs/report.md`](docs/report.md)
+**UrbanThread** has two support people. During the Diwali rush they drown in *"where is my order?"*, *"what's
+the return policy?"* and *"is there a coupon?"*, while the one furious customer waits in the same queue as
+everyone else. Nobody gets alerted, and nothing is recorded.
 
-![Architecture](docs/screenshots/architecture.png)
+**ShopAssist** answers the repetitive 80% instantly, 24×7, **only from the store's own data**, and makes sure
+the other 20% reaches a human fast, with a structured ticket, a Slack alert, an SMS and an e-mail.
 
-## 1. Problem
+| A customer says… | ShopAssist does… | Built with |
+|---|---|---|
+| "What's your return policy?" | answers from the **store FAQ PDF** and cites it | RAG: Pinecone namespace `faq` |
+| "diwali" (one word is enough) | gives **DIWALI25** from the scraped offers page, never an invented code | scraping + LLM summaries, namespace `website` |
+| "Where is UT1003?" | asks for the **last 4 phone digits** first, then shows status + timeline | Postgres, identity check with lockout |
+| "mera order kab aayega?" | replies **in Hinglish** (or हिंदी) | rule-based language detection |
+| "Wow amazing service 🙄 still not here" | spots the **sarcasm** → apologises → **ticket TKT-0005** | guardrails + escalation sub-workflow |
+| "Refund my ₹7,499 order" | can't approve over ₹5,000 → **guaranteed** human ticket | rules after the agent, not just the prompt |
+| "Is the linen kurta in M?" | asks the **Inventory Agent** (a 2nd AI agent) | multi-agent: agent-as-a-tool |
+| "Restock the T-shirt L" | drafts **PO-0004** → manager approves in one tap → supplier gets an SMS | human-in-the-loop, workflow 07 |
+| "Write me a Python script" | politely stays in its lane | out-of-scope guard |
 
-*UrbanThread* is a small online clothing store in India (prices in Rs). Its two support staff spend most
-of the day answering the same questions: *Where is my order? What is the return policy? Which size
-should I buy? Is COD available?* Replies are slow, angry customers wait in the same queue as simple
-questions, and nobody is alerted when an issue is urgent.
-
-
-## 2. Solution
-
-**ShopAssist** is an AI agent on a public chat URL that:
-
-1. answers policy questions from the **store FAQ PDF** (knowledge base 1, Pinecone `source=faq`);
-2. answers questions about offers, shipping partners, fit tips etc. from **scraped and summarized web
-   pages** (knowledge base 2, Pinecone `source=website`);
-3. looks up **orders in Postgres** by order ID or phone number;
-4. **escalates** angry customers, refunds above Rs 5,000 and unanswered questions to a human: it creates a
-   structured ticket in Postgres, posts to **Slack**, sends the customer an **SMS (Twilio)** and **e-mails**
-   the support team;
-5. sends an **SMS automatically when an order is delayed** (order-update webhook);
-6. works as a **team of two domain-expert agents**: the support agent hands stock and procurement questions
-   to an **Inventory Agent**, which checks live stock and drafts purchase orders for manager approval;
-7. understands **one-word messages** (`UT1002`, `returns`, `diwali`, `stock`) and comes with a **web app**
-   (chat + live business dashboard), a **Terminal chat**, an **automatic evaluation** and a **KPI report**.
-
-**Start here: [`docs/RUNBOOK.md`](docs/RUNBOOK.md)** – every step in order, with what you should see.
-
-## 3. Architecture
+## Architecture
 
 ```mermaid
 flowchart LR
-    subgraph Ingestion["Knowledge ingestion (run once)"]
-        PDF["store_faq.pdf"] --> W01["01 Ingest FAQ PDF<br/>loader + splitter 1000/200"]
-        URLS["urls.txt → web pages"] --> W02["02 Scrape + LLM summarize"]
+    subgraph KB["Knowledge (re-runnable)"]
+        PDF["store_faq.pdf"] --> W01["01 Ingest FAQ<br/>split 1000/200 → embed"]
+        WEB["store web pages"] --> W02["02 Scrape → LLM summary → embed"]
     end
-    W01 -- "embeddings<br/>source=faq" --> PC[("Pinecone<br/>index: shopassist")]
-    W02 -- "embeddings<br/>source=website, url" --> PC
+    W01 -->|"namespace faq"| PC[("Pinecone")]
+    W02 -->|"namespace website"| PC
 
-    C(["Customer"]) <--> CHAT["03 Public Chat<br/>ShopAssist AI Agent<br/>Ollama qwen2.5:3b"]
-    CHAT <-->|"faq_knowledge / website_knowledge"| PC
-    CHAT <-->|"order_lookup"| PG[("Supabase Postgres<br/>orders · tickets · chat memory")]
-    CHAT -->|"escalate_to_human"| W04["04 Escalation sub-workflow<br/>Structured Output ticket"]
-    W04 --> PG
-    W04 --> SL["Slack<br/>#support-escalations"]
-    W04 --> TW["Twilio SMS<br/>to customer"]
-    W04 --> EM["Gmail SMTP<br/>to support@"]
-
-    SYS(["Store / courier system"]) -->|"POST order_id, status"| W05["05 Order update webhook"]
-    W05 --> PG
-    W05 -->|"if delayed"| TW
-    CHAT -->|"inventory_expert"| W06["06 Inventory Agent<br/>stock_lookup · create_purchase_order"]
-    W06 <--> PG
-    W06 --> SL
-    APP(["Web app :8501<br/>chat + live dashboard"]) --> CHAT
-    APP -->|"live KPIs"| PG
+    C(["Customer<br/>web app · n8n chat"]) --> GI["Detect Intent<br/>(rules: anger, sarcasm,<br/>Hinglish, identity)"]
+    GI --> AG["03 ShopAssist Agent<br/>Ollama qwen2.5 / Groq Llama 3.3"]
+    AG <-->|"faq / website_knowledge"| PC
+    AG <-->|"order_lookup + phone check"| PG[("Postgres<br/>orders · tickets · memory<br/>stock · POs · events")]
+    AG <-->|"inventory_expert"| W06["06 Inventory Agent<br/>stock_lookup · create_purchase_order"]
+    AG --> SAFE["Guaranteed escalation<br/>(rules after the agent)"]
+    SAFE -->|"angry / refund > ₹5,000"| W04["04 Escalation<br/>structured ticket"]
+    W04 --> PG & SL["Slack"] & SMS["Twilio SMS"] & EM["Gmail"]
+    W06 -->|"review link + token"| SL
+    SL --> W07["07 PO approval<br/>review page → approve/reject"]
+    W07 --> PG & SMS
+    SYS(["Courier system"]) -->|"POST status"| W05["05 Order webhook"] --> PG
+    W05 -->|"delayed"| SMS
+    OPS(["Manager<br/>Ops HQ"]) -->|"live KPIs, approvals"| PG
 ```
 
-## 4. Repository layout
+### The seven workflows
 
-```
-workflows/   01–05 n8n workflow JSON files (import these)
-database/    schema.sql (orders, tickets, chat memory) · seed.sql (10 fake orders)
-data/        store_faq.md + store_faq.pdf · urls.txt · pages/*.html (fake web pages to scrape)
-prompts/     agent_system_prompt.md · ticket_schema.json
-docs/        course_mapping.md · test_questions.md · report.md
-scripts/     build_workflows.py (regenerates workflows/*.json) · import_to_n8n.py · setup_pinecone.py ·
-             verify_setup.py (read-only checks) · make_faq_pdf.py (md → pdf)
-.env.example credential checklist (placeholders only)
-```
+| # | Workflow | Trigger | What it does |
+|---|---|---|---|
+| 01 | Ingest FAQ PDF | manual | PDF → 1000/200 chunks → 768-dim embeddings → **replaces** Pinecone namespace `faq` |
+| 02 | Scrape & summarize | manual | 4 store pages → HTML text → LLM bullet summary → **replaces** namespace `website` (with URL for citations) |
+| 03 | **Support agent** | public chat | Detect Intent rules → Tools Agent (memory + 5 tools) → guaranteed escalation → reply in the customer's language |
+| 04 | Escalation | called by 03 | LLM + structured-output ticket → normalize (never fails) → Postgres → Slack + SMS + e-mail → ticket ID |
+| 05 | Order webhook | `POST /webhook/order-update` | update order + status history → SMS if delayed |
+| 06 | **Inventory Agent** | called by 03 | 2nd AI agent: stock lookup, purchase-order drafts (reorder rule) → Slack review links |
+| 07 | PO approval | `GET po-review` / `POST po-decision` | read-only review page → token-checked decision → Slack + supplier SMS |
 
-| Workflow | Trigger | What it does |
-|----------|---------|--------------|
-| `01_ingest_faq_pdf.json` | Manual | Download FAQ PDF → Default Data Loader + Recursive splitter (1000/200) → Ollama embeddings (768) → Pinecone, `source=faq` |
-| `02_scrape_and_summarize.json` | Manual | Read `urls.txt` → HTTP Request each page → HTML extract → LLM summary → embeddings → Pinecone, `source=website`, `url` |
-| `03_support_agent_chat.json` | Public Chat | Tools Agent + Postgres Chat Memory + tools `faq_knowledge`, `website_knowledge`, `order_lookup`, `escalate_to_human`, `inventory_expert` (→ 06); rule-based *Detect Intent* before and *guaranteed escalation* after the agent (creates the ticket via 04 if the model forgot) |
-| `04_escalation_subworkflow.json` | Called by 03 | LLM + Structured Output Parser → `tickets` insert → Slack → Twilio SMS → SMTP e-mail → returns ticket ID |
-| `05_order_update_webhook.json` | Webhook POST | Update order status → if `delayed`, SMS the customer → JSON response |
-| `06_inventory_agent.json` | Called by 03 | **Second AI agent** (Inventory): tools `stock_lookup` + `create_purchase_order` (Postgres) → Slack approval request → answer back to 03 |
+## Why it's more than a demo
 
-## 5. Accounts and credentials (all free, no credit card)
+Small local models forget things, so **every business rule that matters lives in the workflow, not in the prompt.**
+That one design decision took the evaluation from 9/14 to 14/14.
 
-| What | Used in | How to get it |
-|------|---------|---------------|
-| **Ollama** (local AI, no key) | 01–04 | Install from **ollama.com**, open the app, then `ollama pull qwen2.5:3b` and `ollama pull nomic-embed-text`. The n8n credential is created for you by `scripts/import_to_n8n.py`. |
-| **Pinecone** | 01–03 | app.pinecone.io → API keys. Index `shopassist`, **768** dims, cosine (`scripts/setup_pinecone.py` creates it). |
-| **Postgres** | 03–05 | Supabase → **Connect** → *Session pooler*: host, port 5432, database `postgres`, user `postgres.<project-ref>`, password; SSL on |
-| **Slack API** | 04 | api.slack.com/apps → create app → Bot scopes `chat:write`, `channels:read` → install → Bot token `xoxb-…` |
-| **Twilio API** | 04, 05 | twilio.com/console → Account SID + Auth Token; claim a trial number; verify your own phone |
-| **SMTP** | 04 | Gmail: host `smtp.gmail.com`, port 465, SSL, user = your Gmail, password = **App Password** |
+**🔐 Privacy & security**
+- Orders are shown only with **order ID + last 4 phone digits**. Every check is logged; **5 wrong tries lock the order** for 15 min.
+- The fallback reply (used when the AI fails) can **never** reveal an unverified order. A test enforces this.
+- All SQL uses **query parameters** (no injection). A test fails the build if an expression sneaks into SQL.
+- PO approval links carry a **per-PO secret token**, and opening the link changes nothing (link previews and mail scanners are harmless).
+  Only the Approve/Reject POST does, and only once.
+- Web app: **admin key** for the dashboard, **per-IP rate limit**, message size limit, security headers. Secrets live only in `.env`; CI scans for leaked keys.
 
-Secrets go only into n8n and your local `.env` (git-ignored; template `.env.example`). **Never commit or share real keys.**
+**🛟 Reliability**
+- **Guaranteed escalation**: if the customer is angry, sarcastic or asks for >₹5,000 back and the reply has no ticket ID, the workflow creates the ticket itself.
+- The ticket **normalizer** turns any model output (even garbage) into a valid ticket. Every tool input has a default. Every workflow has a time limit.
+- Re-running ingestion is safe: each knowledge base **replaces its own namespace** (no duplicate vectors).
 
-Why Ollama? The project first used Google Gemini's free tier, but Google refused API access for the
-student's Google projects ("403 project denied"). Ollama runs the models on your own computer: free,
-no API key, no rate limits, and nothing that can be blocked.
+**🧪 Quality you can measure**
+- `scripts/evaluate.py`: **17 scored conversations** checked three ways: keywords, **live-database facts**, and an **AI judge**
+  (a bigger model grades the small one, 1–5, and flags invented facts).
+- **58 pytest tests** run in **GitHub Actions** on every push: workflow structure, the generated files match the generator,
+  the guardrail JavaScript run with Node (anger, sarcasm, Hindi/Hinglish, identity check), and **every SQL query against a real Postgres 16**.
 
-## 6. Setup (≈ 60 minutes, self-hosted n8n on your computer)
+**📈 Business KPIs** (live in Ops HQ, `scripts/kpi_report.py`): share solved without a human, CSAT from 👍/👎,
+tickets by type, sentiment and language, low-stock SKUs, POs pending and decided, blocked identity checks.
 
-1. **Ollama** – install from ollama.com, open the app, then in Terminal:
-   `ollama pull qwen2.5:3b` and `ollama pull nomic-embed-text` (≈ 2.5 GB). With 16 GB RAM or more you can
-   use `qwen2.5:7b` for better answers (change `CHAT_MODEL` in `scripts/build_workflows.py`).
-2. **Supabase** – new project → SQL Editor → run `database/schema.sql`, then `database/seed.sql`.
-   For the SMS demo, change one order's `phone` to your Twilio-verified number.
-3. **`.env`** – `cp .env.example .env`, fill in `N8N_API_KEY` (n8n → Settings → n8n API), `PINECONE_API_KEY`
-   and the `POSTGRES_*` values.
-4. **Pinecone index** – `python3 scripts/setup_pinecone.py` (creates `shopassist`, 768 dims, cosine; if an
-   index with another size exists it asks before recreating it).
-5. **GitHub** – keep this repo **public**; workflows 01/02 download `data/` files from
-   `raw.githubusercontent.com/.../main/...` (or change `main` in those URLs and `data/urls.txt`).
-6. **n8n credentials** – create **Pinecone** and **Postgres** credentials in n8n (Credentials → Create).
-7. **Import workflows** – `python3 scripts/import_to_n8n.py` (reads `.env` itself). It creates or
-   updates all 5 workflows, creates the **Ollama** credential, creates *placeholder* Slack/Twilio/SMTP
-   credentials (so 04/05 can be published before Part B), puts your only credential of each type on every
-   node, and links 03 → 04. Re-running it after `git pull` updates the workflows and keeps your credentials.
-8. **Check** – `pip3 install pg8000` then `python3 scripts/verify_setup.py` (read-only). Continue when it says
-   *All checks passed*.
-9. **Load knowledge** – in n8n open 01 → *Execute workflow*, then 02 → *Execute workflow* (once each;
-   re-running duplicates vectors). Pinecone should then hold ≈ 10 records.
-10. **Go live** – n8n 2.x: **Publish** workflow **04** first, then **03** and **05**. The chat calls the
-    *published* version of 04. After any later edit, publish again. Open the Chat Trigger → copy the **Chat URL**.
-11. **Test** – go through `docs/test_questions.md` and take screenshots for `docs/report.md`.
-12. **Part B (real notifications)** – replace the placeholder Slack/Twilio/SMTP credentials with real ones, set
-    the Twilio *From* number in 04 and 05 and the *From/To e-mail* in 04, then publish 04 and 05 again.
+## Run it
 
-### Troubleshooting
+| Option | Command | Details |
+|---|---|---|
+| 🐳 **Everything in Docker** | `bash scripts/up.sh` | Postgres (with data) + n8n + web app, imports and publishes all workflows |
+| 🔗 **Public demo link** | `bash scripts/share_demo.sh` | free Cloudflare tunnel to the web app only; dashboard protected by `ADMIN_KEY` |
+| ☁️ **Cloud, no laptop** | Render blueprint + `import_to_n8n.py --cloud --publish` | Groq (Llama 3.3 70B) + Cohere multilingual embeddings + Supabase + Pinecone |
+| 💻 Existing local n8n | see [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | step by step, with what you should see after each step |
 
-| Error in n8n | Cause | Fix |
-|--------------|-------|-----|
-| *Mime type doesn't match selected loader* (01) | GitHub serves the PDF as `application/octet-stream` | Fixed by the **Set MIME Type to PDF** node. |
-| *Vector dimension X does not match the dimension of the index* | Pinecone index has the wrong size | `python3 scripts/setup_pinecone.py` (768). |
-| *fetch failed* / *ECONNREFUSED 11434* on an Ollama node | Ollama app not running, or n8n runs in Docker | Open the Ollama app. If n8n runs in Docker, set the Ollama credential's Base URL to `http://host.docker.internal:11434`. |
-| *model "qwen2.5:3b" not found* | Model not downloaded | `ollama pull qwen2.5:3b` (and `nomic-embed-text`). |
-| Chat answers are slow | Local model on a laptop | Normal for the first answer (model loading, ~30 s); later answers are faster. |
-| Chat shows *Error: Failed to receive response* and the Logs panel stays empty | n8n sends chat messages to its **webhook URL**; with a non-default port (e.g. Docker `-p 5679:5678`) n8n thinks it is on 5678 | Run `bash scripts/fix_webhook_url.sh shopassist-n8n 5679` (recreates the Docker container with `WEBHOOK_URL`, keeps data, makes a backup). The Chat URL in the Chat Trigger node must start with `http://localhost:5679/`. `python3 scripts/doctor.py` checks this. |
-| *Workflow is not active and cannot be executed* (during chat) | Workflow 04 is not published | Publish workflow 04. |
-| *Cannot publish workflow … Missing required credential* | A node has no credential | Run the import script again (creates placeholders), or select the credential in the node. |
-| Twilio *unverified number* | Trial account | Verify the phone in the Twilio console or use your own number in `seed.sql`. |
+Full guide: **[`docs/DEPLOY.md`](docs/DEPLOY.md)**. Local AI needs the [Ollama](https://ollama.com) app and
+`ollama pull qwen2.5:3b && ollama pull nomic-embed-text`.
 
-## Tools you run from the Terminal
+### Everyday commands
 
 | Command | What it does |
-|---------|--------------|
-| `python3 scripts/setup_database.py` | creates/updates all tables in Supabase and loads the fake data (safe to re-run) |
-| `python3 scripts/import_to_n8n.py` | creates/updates workflows 01–06 in n8n, credentials, links between agents |
-| `python3 scripts/doctor.py` | read-only diagnosis: code, `.env`, Ollama, workflows, chat port, last errors |
-| `python3 scripts/test_chat.py` | tests Ollama, the chat (03) and the webhook (05) from the Terminal |
-| `python3 scripts/chat_cli.py` | **interactive chat in the Terminal** – type anything, one word is fine |
-| `python3 app/server.py` | **web app** on http://localhost:8501 – chat + live dashboard |
-| `python3 scripts/evaluate.py` | asks 14 test questions, scores the answers → `docs/evaluation_results.md` |
-| `python3 scripts/kpi_report.py` | business KPIs from the live database → `docs/kpi_report.md` |
+|---|---|
+| `python3 app/server.py` | web app on http://localhost:8501: 💬 chat + 📊 Ops HQ |
+| `python3 scripts/import_to_n8n.py [--publish] [--cloud]` | create/update the 7 workflows and credentials in n8n |
+| `python3 scripts/doctor.py` | read-only diagnosis: .env, Ollama, Pinecone namespaces, workflows, chat port, last errors |
+| `python3 scripts/chat_cli.py` | chat in the terminal |
+| `python3 scripts/evaluate.py` | 17 scored tests + AI judge → `docs/evaluation_results.md` |
+| `python3 scripts/kpi_report.py` | business KPIs → `docs/kpi_report.md` |
+| `pytest` | the test suite (set `PGHOST` etc. to include the SQL tests) |
+| `python3 scripts/build_workflows.py` | regenerate `workflows/*.json` (local + cloud) from the code and `prompts/` |
 
-## 7. Demo questions
+## Try these
 
-1. *What is your return policy?* → FAQ answer with source
-2. *Is there any Diwali discount code?* → website answer (DIWALI25) with page URL
-3. *Where is my order UT1002?* → order lookup
-4. *Order UT1005 doesn't fit – can I return it and when do I get my refund?* → order + FAQ combined
-5. *When will my order arrive?* → asks for order ID
-6. *Third time asking! UT1003 is late, I want a manager!* → escalation, ticket ID, Slack + SMS + e-mail
-7. *Write me a Python script* → polite out-of-scope reply
-8. *Refund my order UT1004 now* (Rs 7,499) → refund over Rs 5,000 → escalation
-9. *UT1003* / *returns* / *diwali* (one word) → order status / return policy / Diwali offer
-10. *Is the linen kurta available in size M?* → handed to the **Inventory Agent** → in stock
-11. *low stock* → Inventory Agent lists products below their reorder level
-12. *Restock the Basics T-shirt size L* → Inventory Agent drafts **PO-000N** (pending manager approval)
-
-Full expected behaviour: [`docs/test_questions.md`](docs/test_questions.md).
-
-## 8. Course mapping (summary)
-
-| Course topic (sessions) | Where |
-|-------------------------|-------|
-| n8n basics, triggers, expressions, Code, IF (1–4) | All workflows; Code node (02), IF node (05) |
-| LLMs, prompts, chains (5–6) | System prompt, summarization chain (02), ticket chain (04) |
-| Embeddings, chunking, RAG with Pinecone (7–9) | 01, 02 insert; 03 retrieval tools |
-| Structured output / schemas (10–11) | Structured Output Parser + `ticket_schema.json` (04) |
-| AI agents, multi-agent, sub-workflows (12–13) | Support agent (03) + **Inventory Agent (06)** as `inventory_expert` tool; `escalate_to_human` → 04 |
-| Agentic RAG, two knowledge bases (14–15) | `faq_knowledge` + `website_knowledge` |
-| SMTP e-mail, public chat (16–17) | Gmail SMTP (04); public hosted chat (03) |
-| Metadata filtering (18) | `source`, `url`, `title` metadata + filters |
-| Agent + Postgres, memory (19–20) | `order_lookup`, Postgres Chat Memory, `tickets` |
-| Slack, Twilio, scraping + summarization, capstone (21–24) | 02, 04, 05 |
-
-Detailed table: [`docs/course_mapping.md`](docs/course_mapping.md). Report: [`docs/report.md`](docs/report.md).
-
-## 9. Regenerating files (optional)
-
-```bash
-pip install reportlab
-python scripts/make_faq_pdf.py      # data/store_faq.md -> data/store_faq.pdf
-python scripts/build_workflows.py   # prompts/* -> workflows/*.json
+```
+UT1003                      → asks for the phone digits, shows nothing yet
+0003                        → verified: delayed with Ekart + timeline
+UT1002, phone ends 9999     → digits don't match → no details
+diwali                      → DIWALI25, 25% off above ₹2,499
+mera order UT1003 kab aayega? last 4 digits 0003   → Hinglish answer
+Wow great service 🙄 still not delivered            → sarcasm → ticket
+I returned UT1004, refund me now                    → over ₹5,000 → ticket
+Is the linen kurta available in size M?             → Inventory Agent
+Restock the Basics T-shirt size L                   → PO draft → approve in Ops HQ
 ```
 
-## 10. Stack
+All 17 with expected behaviour: [`docs/test_questions.md`](docs/test_questions.md).
 
-| Purpose | Service (free tier) |
-|---|---|
-| Chat LLM | Ollama `qwen2.5:3b` (local, tool calling) |
-| Embeddings | Ollama `nomic-embed-text` (768 dims, local) |
-| Vector DB | Pinecone Starter |
-| Database + chat memory | Supabase Free |
-| SMS | Twilio trial |
-| Alerts | Slack Free |
-| E-mail | Gmail SMTP |
-| Automation | self-hosted n8n (Community Edition) |
+## Stack (all free)
 
-## 11. Limitations
+| Layer | Local | Cloud |
+|---|---|---|
+| Orchestration | n8n 2.48 (Docker) | n8n on Render, data in Supabase schema `n8n` |
+| Chat model | Ollama `qwen2.5:3b` (tool calling) | Groq `llama-3.3-70b-versatile` |
+| Embeddings | Ollama `nomic-embed-text` (768) | Cohere `embed-multilingual-v3.0` (1024) |
+| Vector DB | Pinecone index `shopassist`, namespaces `faq` / `website` | Pinecone `shopassist-cloud` |
+| Database + memory | Postgres 16 / Supabase | Supabase |
+| Alerts | Slack · Twilio SMS · Gmail SMTP | same |
+| App | Python standard library + pg8000, one HTML file | Docker on Render |
 
-Fake data only; a small local model (3B parameters) is slower and less accurate than large cloud models, and the chat only works while your computer, n8n and Ollama are running; a single Pinecone index with metadata filters (no namespaces); no authentication on the
-public chat (anyone with the link can ask about an order ID); Twilio trial can only SMS verified numbers.
-See the report for details and future scope (inventory agent + supervisor, Flowise version, larger models).
+## Repository map
 
-## License
+```
+workflows/          01–07 n8n workflows (generated, never hand-edited)   workflows/cloud/  same for Groq + Cohere
+scripts/            build_workflows.py (the source of the workflows) · import_to_n8n.py · up.sh · share_demo.sh
+                    doctor.py · evaluate.py · kpi_report.py · setup_database.py · setup_pinecone.py · chat_cli.py
+prompts/            agent_system_prompt.md · inventory_agent_prompt.md · detect_intent.js · ticket_schema.json
+database/           schema.sql (9 tables, re-runnable) · seed.sql (10 orders, 12 products, order history)
+app/                server.py + index.html (chat + Ops HQ)
+tests/              58 pytest tests (workflows, guardrails via Node, SQL on Postgres, evaluation helpers)
+docs/               DEPLOY.md · RUNBOOK.md · report.md · test_questions.md · course_mapping.md · screenshots/
+docker-compose.yml  Dockerfile  render.yaml  .github/workflows/ci.yml
+```
 
-MIT – see `LICENSE`.
+## Honest limitations
+
+- The identity check is "last 4 digits + lockout", not a real SMS OTP (next step: Twilio Verify).
+- The 3B local model is slow (~10 s per answer) and needs the guardrails; the cloud profile uses a 70B model.
+- Hinglish and sarcasm detection are word lists: good on common phrasing, not on everything.
+- Free tiers: Twilio trial only texts verified numbers; Render free instances sleep after 15 minutes idle.
+- All data is fictional; there is no real payment or courier integration.
+
+## Course mapping and report
+
+Capstone for *Agentic AI for Business Automation* (FORE School of Management). Session-by-session mapping:
+[`docs/course_mapping.md`](docs/course_mapping.md). Report: [`docs/report.md`](docs/report.md) (v2 changes in
+section 6b) · submitted Word/PDF versions (v1, 10 Oct 2026) in [`docs/submission/`](docs/submission/).
+
+MIT License.

@@ -389,7 +389,7 @@ def wf03():
               "The Tools Agent decides which tool to call:\n"
               "- `faq_knowledge` – Pinecone namespace `faq`\n"
               "- `website_knowledge` – Pinecone namespace `website`\n"
-              "- `order_lookup` – Postgres query by order ID or phone\n"
+              "- `order_lookup` – Postgres, order ID + last 4 phone digits (identity check, lockout after 5 tries)\n"
               "- `escalate_to_human` – calls workflow 04 (Slack + SMS + e-mail)\n"
               "- `inventory_expert` – asks the **Inventory Agent** (workflow 06) – multi-agent\n\n"
               "**Guardrails:** *Detect Intent* (rules) before the agent; after it, if a human is needed and the "
@@ -519,6 +519,8 @@ def wf03():
             "if (!reply) {  // the AI step failed (e.g. bad tool call): answer from the database / rules instead\n"
             "  const r = order.order_id && order.verified ? order : null;  // never show details without the phone check\n"
             "  reply = r ? `Your order ${r.order_id} (${r.items}) is ${String(r.status).replace(/_/g, ' ')}. Expected delivery: ${String(r.expected_delivery).slice(0, 10)}, courier ${r.courier}, tracking ${r.tracking_no}.`\n"
+            "    : (order.order_id && intent.last4) ? `The phone digits you gave do not match order ${order.order_id}, so I cannot show it. Please check the last 4 digits of the phone number used for the order.`\n"
+            "    : (order.order_id && !intent.escalate && !intent.refund) ? `To keep your order private, please share the last 4 digits of the phone number used for order ${order.order_id}.`\n"
             "    : (intent.escalate || intent.refund) ? 'I am sorry for the trouble. Let me connect you with our support team.'\n"
             "    : 'Sorry, I could not process that just now. Please share your order ID (like UT1003) or ask about returns, sizes, delivery, offers or stock.';\n"
             "}\n"
@@ -650,7 +652,7 @@ def wf04():
             "let phone = String(t.phone || inp.phone || '').replace(/[^0-9+]/g, '');\n"
             "if (/^[0-9]{10}$/.test(phone)) phone = '+91' + phone;  // Indian 10-digit number -> E.164\n"
             "const oid = (String(t.order_id || '') + ' ' + String(inp.order_id || '') + ' ' + text).toUpperCase().match(/UT\\d{4}/);\n"
-            "const issueGuess = text.includes('refund') ? 'refund' : text.includes('late') || text.includes('delay') ? 'delivery' : 'other';\n"
+            "const issueGuess = /refund|paise? wapas|money back/.test(text) ? 'refund' : /late|delay|kab aayega|not (here|delivered|arrived)|where is|deliver/.test(text) ? 'delivery' : 'other';\n"
             "const angry = /angry|manager|worst|third time|furious|complain|sarcas|upset|bakwas|ghatiya/.test(text);\n"
             "const raw = String(inp.reason || '') + ' ' + String(inp.conversation_summary || '');\n"
             "const language = /[\\u0900-\\u097F]/.test(raw) ? 'hi' : /\\b(kya|hai|mera|kab|nahi|aayega|chahiye|wapas|karo|bhai)\\b/i.test(raw) ? 'hinglish' : 'en';\n"
@@ -917,7 +919,7 @@ def wf06():
         )},
     }, ["postgres"])
     # Purchase orders this run created, with their secret approval token (only goes into the manager's message).
-    new_pos = wf.node("New Purchase Orders", "n8n-nodes-base.postgres", 2.5, (480, 0), {
+    new_pos = wf.node("New Purchase Orders", "n8n-nodes-base.postgres", 2.5, (600, 0), {
         "operation": "executeQuery",
         "query": (
             "SELECT po.po_id, po.sku, p.name || COALESCE(' (' || p.size || ')', '') AS product, po.quantity,\n"
@@ -928,7 +930,7 @@ def wf06():
         ),
         "options": {},
     }, ["postgres"], alwaysOutputData=True, executeOnce=True, onError="continueRegularOutput")
-    slack = wf.node("Ask Manager to Approve (Slack)", "n8n-nodes-base.slack", 2.3, (700, 0), {
+    slack = wf.node("Ask Manager to Approve (Slack)", "n8n-nodes-base.slack", 2.3, (820, 0), {
         "select": "channel",
         "channelId": rl("#support-escalations", "name"),
         "text": (
@@ -941,7 +943,7 @@ def wf06():
         ),
         "otherOptions": {"unfurl_links": False, "unfurl_media": False},
     }, ["slackApi"], onError="continueRegularOutput", executeOnce=True)
-    ret = wf.node("Return Answer to Support Agent", "n8n-nodes-base.set", 3.4, (920, 0), {
+    ret = wf.node("Return Answer to Support Agent", "n8n-nodes-base.set", 3.4, (1040, 0), {
         "assignments": {"assignments": [
             {"id": "a1", "name": "answer", "type": "string", "value": "={{ $('Inventory AI Agent').item.json.output }}"},
         ]},
@@ -959,7 +961,7 @@ def wf06():
 
 # ---------------------------------------------------------------- 07 purchase-order approval
 PAGE_STYLE = ("<meta name='viewport' content='width=device-width,initial-scale=1'><style>"
-              "body{font-family:system-ui,sans-serif;background:#0f0e17;color:#fffffe;display:grid;place-items:center;"
+              "*{box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0f0e17;color:#fffffe;display:grid;place-items:center;"
               "min-height:100vh;margin:0;padding:16px}.c{background:#1b1a27;border-radius:20px;padding:24px;max-width:420px;"
               "width:100%;box-shadow:0 0 0 2px #c6ff3d33}h1{margin:0 0 8px;font-size:22px}p{color:#b8b5c9}"
               "b{color:#c6ff3d}button{font:600 16px system-ui;border:0;border-radius:999px;padding:12px 20px;margin:6px 6px 0 0;"

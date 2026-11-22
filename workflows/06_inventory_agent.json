@@ -141,7 +141,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        480,
+        600,
         0
       ],
       "credentials": {
@@ -173,7 +173,7 @@
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2.3,
       "position": [
-        700,
+        820,
         0
       ],
       "credentials": {
@@ -204,7 +204,7 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        920,
+        1040,
         0
       ],
       "executeOnce": true

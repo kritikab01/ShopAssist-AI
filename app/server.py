@@ -106,7 +106,12 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 st_n, _, _ = http("GET", f"{N8N}/healthz", timeout=5)
                 pub, n8n_ok = {}, st_n == 200
-            return self.send(200, to_json({"n8n": n8n_ok, "ollama": st_o == 200, "published": pub}))
+            try:
+                db().close()
+                db_ok = True
+            except Exception:
+                db_ok = False
+            return self.send(200, to_json({"n8n": n8n_ok, "ollama": st_o == 200, "db": db_ok, "published": pub}))
         self.send(404, b"{}")
 
     def do_POST(self):
