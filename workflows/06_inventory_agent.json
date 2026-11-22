@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## Overview – Workflow 06\n**Second domain-expert agent** (multi-agent). Called by the support agent (03) through the `inventory_expert` tool.\n\nTools: `stock_lookup` (Postgres `products`) and `create_purchase_order` (inserts into `purchase_orders`, status *pending_approval*). After the agent answers, a Slack message asks a manager to approve any new purchase order.\n\nCourse: 12–13 (multi-agent, sub-workflows), 19–20 (agent + Postgres), Slack API.",
+        "content": "## Overview – Workflow 06\n**Second domain-expert agent** (multi-agent). Called by the support agent (03) through the `inventory_expert` tool.\n\nTools: `stock_lookup` (Postgres `products`) and `create_purchase_order` (inserts into `purchase_orders`, status *pending_approval*). After the agent answers, a Slack message gives the manager a **Review and approve / reject** link per new purchase order (workflow 07).\n\nCourse: 12–13 (multi-agent, sub-workflows), 19–20 (agent + Postgres), Slack API.",
         "width": 560,
         "height": 340,
         "color": 4
@@ -132,21 +132,48 @@
     },
     {
       "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT po.po_id, po.sku, p.name || COALESCE(' (' || p.size || ')', '') AS product, po.quantity,\n       po.supplier, po.est_cost_inr, po.approval_token\nFROM purchase_orders po JOIN products p ON p.sku = po.sku\nWHERE po.status = 'pending_approval' AND po.created_at > now() - interval '3 minutes'\nORDER BY po.id;",
+        "options": {}
+      },
+      "id": "f7c4182d-27f7-59b1-9ef8-1be03a145102",
+      "name": "New Purchase Orders",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        480,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME_postgres",
+          "name": "Supabase Postgres"
+        }
+      },
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
         "select": "channel",
         "channelId": {
           "__rl": true,
           "value": "#support-escalations",
           "mode": "name"
         },
-        "text": "=:package: *Inventory Agent*\nRequest: {{ $('When Called by Support Agent').item.json.question }}\nAnswer: {{ $json.output }}\nPlease review any purchase order marked *pending_approval*.",
-        "otherOptions": {}
+        "text": "=:package: *Inventory Agent*\nRequest: {{ $('When Called by Support Agent').item.json.question }}\nAnswer: {{ $('Inventory AI Agent').item.json.output }}\n{{ $('New Purchase Orders').all().filter(i => i.json.po_id).map(i => ':memo: *' + i.json.po_id + '* ' + i.json.quantity + ' x ' + i.json.product + ' from ' + i.json.supplier + ', approx. Rs ' + i.json.est_cost_inr + ' -> <__N8N_PUBLIC_URL__/webhook/po-review?po=' + i.json.po_id + '&token=' + i.json.approval_token + '|Review and approve / reject>').join('\\n') || '' }}",
+        "otherOptions": {
+          "unfurl_links": false,
+          "unfurl_media": false
+        }
       },
       "id": "756b456c-b4bc-5a46-a310-fbe206d96f8e",
       "name": "Ask Manager to Approve (Slack)",
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2.3,
       "position": [
-        560,
+        700,
         0
       ],
       "credentials": {
@@ -155,7 +182,8 @@
           "name": "Slack account"
         }
       },
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -176,9 +204,10 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        780,
+        920,
         0
-      ]
+      ],
+      "executeOnce": true
     }
   ],
   "connections": {
@@ -194,6 +223,17 @@
       ]
     },
     "Inventory AI Agent": {
+      "main": [
+        [
+          {
+            "node": "New Purchase Orders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Purchase Orders": {
       "main": [
         [
           {

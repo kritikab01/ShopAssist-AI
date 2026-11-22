@@ -1,4 +1,4 @@
-"""Generate the five n8n workflow JSON files in workflows/.
+"""Generate the seven n8n workflow JSON files in workflows/.
 
 Why a generator? It keeps the agent system prompt (prompts/agent_system_prompt.md) and the
 ticket JSON schema (prompts/ticket_schema.json) in ONE place, and guarantees every workflow
@@ -37,6 +37,22 @@ CRED = {
 TWILIO_FROM = "+10000000000"  # placeholder: replace with your Twilio phone number in n8n
 SUPPORT_EMAIL = "support@urbanthread.example"  # placeholder: replace with your own inbox
 SENDER_EMAIL = "your.gmail@gmail.com"  # placeholder: the Gmail account used in SMTP credential
+# Address of n8n as the manager's browser sees it (approval links). scripts/import_to_n8n.py replaces this
+# placeholder with N8N_PUBLIC_URL (or N8N_URL) from .env, e.g. http://localhost:5679 or your tunnel / cloud URL.
+PUBLIC_N8N = "__N8N_PUBLIC_URL__"
+
+# One-click PO decision (workflow 07): only changes a PO that is still pending AND whose secret token matches.
+PO_DECISION_SQL = (
+    "-- $1 = PO ID, $2 = approve / reject, $3 = secret token from the link, $4 = who decided\n"
+    "UPDATE purchase_orders po\n"
+    "SET status = CASE WHEN LOWER($2) = 'approve' THEN 'approved' ELSE 'rejected' END,\n"
+    "    decided_at = now(), decided_by = COALESCE(NULLIF(TRIM($4), ''), 'manager')\n"
+    "FROM products p\n"
+    "WHERE p.sku = po.sku AND po.po_id = UPPER(TRIM($1)) AND po.approval_token = $3\n"
+    "  AND po.status = 'pending_approval' AND LOWER($2) IN ('approve', 'reject')\n"
+    "RETURNING po.po_id, po.sku, po.quantity, po.supplier, po.est_cost_inr, po.status, po.decided_by,\n"
+    "          p.name || COALESCE(' (' || p.size || ')', '') AS product, p.supplier_phone;"
+)
 
 # Identity check for order_lookup: an order is only shown when the customer gives the order ID AND the last 4 digits
 # of the phone number on that order. Every check is logged in verification_attempts; 5 wrong tries in 15 minutes
@@ -738,15 +754,21 @@ def wf05():
     upd = wf.node("Update Order Status", "n8n-nodes-base.postgres", 2.5, (220, 0), {
         "operation": "executeQuery",
         "query": (
-            "UPDATE orders\n"
-            "SET status = LOWER($2),\n"
-            "    expected_delivery = COALESCE(NULLIF($3, '')::date, expected_delivery),\n"
-            "    updated_at = now()\n"
-            "WHERE order_id = UPPER($1)\n"
-            "RETURNING order_id, customer_name, phone, status, expected_delivery;"
+            "WITH u AS (\n"
+            "  UPDATE orders\n"
+            "  SET status = LOWER($2),\n"
+            "      expected_delivery = COALESCE(NULLIF($3, '')::date, expected_delivery),\n"
+            "      updated_at = now()\n"
+            "  WHERE order_id = UPPER($1)\n"
+            "  RETURNING order_id, customer_name, phone, status, expected_delivery\n"
+            "), e AS (  -- status history for the timeline / dashboard\n"
+            "  INSERT INTO order_events (order_id, status, note)\n"
+            "  SELECT order_id, status, COALESCE(NULLIF($4, ''), 'Status update from the store system') FROM u\n"
+            ")\n"
+            "SELECT * FROM u;"
         ),
         "options": {"queryReplacement": (
-            "={{ [ $json.body.order_id, $json.body.status, $json.body.new_expected_delivery || '' ] }}"
+            "={{ [ $json.body.order_id, $json.body.status, $json.body.new_expected_delivery || '', $json.body.note || '' ] }}"
         )},
     }, ["postgres"], alwaysOutputData=True)
     cond = wf.node("Is Delayed?", "n8n-nodes-base.if", 2.2, (440, 0), {
@@ -809,8 +831,8 @@ def wf06():
               "**Second domain-expert agent** (multi-agent). Called by the support agent (03) through the "
               "`inventory_expert` tool.\n\n"
               "Tools: `stock_lookup` (Postgres `products`) and `create_purchase_order` (inserts into "
-              "`purchase_orders`, status *pending_approval*). After the agent answers, a Slack message asks "
-              "a manager to approve any new purchase order.\n\n"
+              "`purchase_orders`, status *pending_approval*). After the agent answers, a Slack message gives "
+              "the manager a **Review and approve / reject** link per new purchase order (workflow 07).\n\n"
               "Course: 12–13 (multi-agent, sub-workflows), 19–20 (agent + Postgres), Slack API.",
               (-120, -420), w=560, h=340, color=4)
     trig = wf.node("When Called by Support Agent", "n8n-nodes-base.executeWorkflowTrigger", 1.1, (0, 0), {
@@ -875,21 +897,40 @@ def wf06():
             "$fromAI('reason', 'Short reason, e.g. stock 6 below reorder level 20', 'string') ] }}"
         )},
     }, ["postgres"])
-    slack = wf.node("Ask Manager to Approve (Slack)", "n8n-nodes-base.slack", 2.3, (560, 0), {
+    # Purchase orders this run created, with their secret approval token (only goes into the manager's message).
+    new_pos = wf.node("New Purchase Orders", "n8n-nodes-base.postgres", 2.5, (480, 0), {
+        "operation": "executeQuery",
+        "query": (
+            "SELECT po.po_id, po.sku, p.name || COALESCE(' (' || p.size || ')', '') AS product, po.quantity,\n"
+            "       po.supplier, po.est_cost_inr, po.approval_token\n"
+            "FROM purchase_orders po JOIN products p ON p.sku = po.sku\n"
+            "WHERE po.status = 'pending_approval' AND po.created_at > now() - interval '3 minutes'\n"
+            "ORDER BY po.id;"
+        ),
+        "options": {},
+    }, ["postgres"], alwaysOutputData=True, executeOnce=True, onError="continueRegularOutput")
+    slack = wf.node("Ask Manager to Approve (Slack)", "n8n-nodes-base.slack", 2.3, (700, 0), {
         "select": "channel",
         "channelId": rl("#support-escalations", "name"),
-        "text": "=:package: *Inventory Agent*\nRequest: {{ $('When Called by Support Agent').item.json.question }}\n"
-                "Answer: {{ $json.output }}\nPlease review any purchase order marked *pending_approval*.",
-        "otherOptions": {},
-    }, ["slackApi"], onError="continueRegularOutput")
-    ret = wf.node("Return Answer to Support Agent", "n8n-nodes-base.set", 3.4, (780, 0), {
+        "text": (
+            "=:package: *Inventory Agent*\nRequest: {{ $('When Called by Support Agent').item.json.question }}\n"
+            "Answer: {{ $('Inventory AI Agent').item.json.output }}\n"
+            "{{ $('New Purchase Orders').all().filter(i => i.json.po_id).map(i => ':memo: *' + i.json.po_id + '* ' + "
+            "i.json.quantity + ' x ' + i.json.product + ' from ' + i.json.supplier + ', approx. Rs ' + i.json.est_cost_inr + "
+            "' -> <" + PUBLIC_N8N + "/webhook/po-review?po=' + i.json.po_id + '&token=' + i.json.approval_token + "
+            "'|Review and approve / reject>').join('\\n') || '' }}"
+        ),
+        "otherOptions": {"unfurl_links": False, "unfurl_media": False},
+    }, ["slackApi"], onError="continueRegularOutput", executeOnce=True)
+    ret = wf.node("Return Answer to Support Agent", "n8n-nodes-base.set", 3.4, (920, 0), {
         "assignments": {"assignments": [
             {"id": "a1", "name": "answer", "type": "string", "value": "={{ $('Inventory AI Agent').item.json.output }}"},
         ]},
         "options": {},
-    })
+    }, executeOnce=True)
     wf.link(trig, agent)
-    wf.link(agent, slack)
+    wf.link(agent, new_pos)
+    wf.link(new_pos, slack)
     wf.link(slack, ret)
     wf.link(llm, agent, "ai_languageModel")
     wf.link(stock, agent, "ai_tool")
@@ -897,7 +938,129 @@ def wf06():
     wf.save("06_inventory_agent.json")
 
 
+# ---------------------------------------------------------------- 07 purchase-order approval
+PAGE_STYLE = ("<meta name='viewport' content='width=device-width,initial-scale=1'><style>"
+              "body{font-family:system-ui,sans-serif;background:#0f0e17;color:#fffffe;display:grid;place-items:center;"
+              "min-height:100vh;margin:0;padding:16px}.c{background:#1b1a27;border-radius:20px;padding:24px;max-width:420px;"
+              "width:100%;box-shadow:0 0 0 2px #c6ff3d33}h1{margin:0 0 8px;font-size:22px}p{color:#b8b5c9}"
+              "b{color:#c6ff3d}button{font:600 16px system-ui;border:0;border-radius:999px;padding:12px 20px;margin:6px 6px 0 0;"
+              "cursor:pointer}.ok{background:#c6ff3d;color:#0f0e17}.no{background:#2b2a3a;color:#fffffe}</style>")
+
+
+def wf07():
+    wf = WF("07 Purchase Order Approval (Manager)", timeout=60)
+    wf.sticky("Overview – Workflow 07",
+              "**Human-in-the-loop approval** for purchase orders drafted by the Inventory Agent (06).\n\n"
+              "1. Slack message (06) / dashboard → `GET /webhook/po-review?po=PO-0001&token=…` shows a review page "
+              "(changes nothing – link previews and e-mail scanners can open it safely).\n"
+              "2. Manager presses **Approve** or **Reject** → `POST /webhook/po-decision` → PO updated only if the "
+              "secret token matches and it is still *pending_approval* → Slack confirmation → if approved, SMS to the "
+              "supplier (Twilio).\n\nCourse: webhooks, IF, Postgres, Slack, Twilio, human-in-the-loop.",
+              (-120, -460), w=620, h=380, color=4)
+    # --- review page (read only)
+    rv = wf.node("Review Link (GET)", "n8n-nodes-base.webhook", 2, (0, 0), {
+        "httpMethod": "GET", "path": "po-review", "responseMode": "responseNode", "options": {},
+    }, webhookId=str(uuid.uuid5(uuid.NAMESPACE_URL, "shopassist-po-review")))
+    find = wf.node("Find Purchase Order", "n8n-nodes-base.postgres", 2.5, (220, 0), {
+        "operation": "executeQuery",
+        "query": (
+            "SELECT po.po_id, po.quantity, po.supplier, po.est_cost_inr, po.status, po.reason, po.approval_token,\n"
+            "       p.name || COALESCE(' (' || p.size || ')', '') AS product, p.stock, p.reorder_level\n"
+            "FROM purchase_orders po JOIN products p ON p.sku = po.sku\n"
+            "WHERE po.po_id = UPPER(TRIM($1)) AND po.approval_token = $2;"
+        ),
+        "options": {"queryReplacement": "={{ [ $json.query.po || '', $json.query.token || '' ] }}"},
+    }, ["postgres"], alwaysOutputData=True)
+    page = wf.node("Show Review Page", "n8n-nodes-base.respondToWebhook", 1.1, (440, 0), {
+        "respondWith": "text",
+        "responseBody": (
+            "={{ \"<!doctype html><title>Purchase order</title>" + PAGE_STYLE + "<div class='c'>\" + ($json.po_id ? "
+            "('<h1>📦 ' + $json.po_id + '</h1><p><b>' + $json.quantity + ' x ' + $json.product + '</b><br>Supplier: ' + "
+            "$json.supplier + '<br>Estimated cost: Rs ' + $json.est_cost_inr + '<br>Stock now: ' + $json.stock + "
+            "' (reorder level ' + $json.reorder_level + ')<br>Reason: ' + ($json.reason || '-') + '</p>' + "
+            "($json.status === 'pending_approval' ? ('<form method=post action=po-decision>"
+            "<input type=hidden name=po value=' + $json.po_id + '><input type=hidden name=token value=' + "
+            "$json.approval_token + '><button class=ok name=action value=approve>✅ Approve</button>"
+            "<button class=no name=action value=reject>❌ Reject</button></form>') : "
+            "('<p>Already <b>' + $json.status + '</b>.</p>'))) : '<h1>🔒 Link not valid</h1><p>Check the link "
+            "in Slack.</p>') + '</div>' }}"
+        ),
+        "options": {"responseHeaders": {"entries": [{"name": "Content-Type", "value": "text/html; charset=utf-8"}]}},
+    })
+    # --- decision (changes data)
+    dec = wf.node("Decision (POST)", "n8n-nodes-base.webhook", 2, (0, 320), {
+        "httpMethod": "POST", "path": "po-decision", "responseMode": "responseNode", "options": {},
+    }, webhookId=str(uuid.uuid5(uuid.NAMESPACE_URL, "shopassist-po-decision")))
+    apply_ = wf.node("Apply Decision (token check)", "n8n-nodes-base.postgres", 2.5, (220, 320), {
+        "operation": "executeQuery",
+        "query": PO_DECISION_SQL,
+        "options": {"queryReplacement": (
+            "={{ [ $json.body.po || '', $json.body.action || '', $json.body.token || '', $json.body.by || '' ] }}"
+        )},
+    }, ["postgres"], alwaysOutputData=True)
+    valid = wf.node("Valid Decision?", "n8n-nodes-base.if", 2.2, (440, 320), {
+        "conditions": {
+            "options": {"caseSensitive": True, "leftValue": "", "typeValidation": "loose", "version": 2},
+            "conditions": [{"id": "v1", "leftValue": "={{ $json.po_id }}", "rightValue": "",
+                            "operator": {"type": "string", "operation": "notEmpty", "singleValue": True}}],
+            "combinator": "and",
+        },
+        "options": {},
+    })
+    slack = wf.node("Tell Team in Slack", "n8n-nodes-base.slack", 2.3, (660, 220), {
+        "select": "channel",
+        "channelId": rl("#support-escalations", "name"),
+        "text": ("={{ $json.status === 'approved' ? ':white_check_mark:' : ':x:' }} *{{ $json.po_id }}* "
+                 "{{ $json.status }} by {{ $json.decided_by }}: {{ $json.quantity }} x {{ $json.product }} "
+                 "from {{ $json.supplier }} (approx. Rs {{ $json.est_cost_inr }})"),
+        "otherOptions": {},
+    }, ["slackApi"], onError="continueRegularOutput")
+    approved = wf.node("Approved?", "n8n-nodes-base.if", 2.2, (880, 220), {
+        "conditions": {
+            "options": {"caseSensitive": True, "leftValue": "", "typeValidation": "loose", "version": 2},
+            "conditions": [{"id": "a1", "leftValue": "={{ $('Apply Decision (token check)').item.json.status }}",
+                            "rightValue": "approved", "operator": {"type": "string", "operation": "equals"}}],
+            "combinator": "and",
+        },
+        "options": {},
+    })
+    A = "$('Apply Decision (token check)').item.json"
+    sms = wf.node("SMS Supplier (Twilio)", "n8n-nodes-base.twilio", 1, (1100, 120), {
+        "from": TWILIO_FROM,
+        "to": "={{ " + A + ".supplier_phone }}",
+        "message": ("=UrbanThread purchase order {{ " + A + ".po_id }}: please supply {{ " + A + ".quantity }} x "
+                    "{{ " + A + ".product }} (SKU {{ " + A + ".sku }}). Reply to confirm the delivery date."),
+        "options": {},
+    }, ["twilioApi"], onError="continueRegularOutput")
+    RESULT = ("{ ok: !!" + A + ".po_id, po_id: " + A + ".po_id || null, status: " + A + ".status || null, "
+              "message: " + A + ".po_id ? ('Purchase order ' + " + A + ".status) : 'Link not valid or already decided' }")
+    done = wf.node("Show Result", "n8n-nodes-base.respondToWebhook", 1.1, (1320, 320), {
+        "respondWith": "text",
+        "responseBody": (
+            "={{ $('Decision (POST)').item.json.body.format === 'json' ? JSON.stringify(" + RESULT + ") : "
+            "\"<!doctype html><title>Purchase order</title>" + PAGE_STYLE + "<div class='c'>\" + (" + A + ".po_id ? "
+            "('<h1>' + (" + A + ".status === 'approved' ? '✅ ' : '❌ ') + " + A + ".po_id + ' ' + " + A + ".status + "
+            "'</h1><p>The team was told in Slack' + (" + A + ".status === 'approved' ? ' and the supplier got an SMS' : '') + "
+            "'.</p>') : '<h1>🔒 Not changed</h1><p>The link is not valid or this order was already decided.</p>') + "
+            "'</div>' }}"
+        ),
+        "options": {"responseHeaders": {"entries": [{"name": "Content-Type", "value":
+            "={{ $('Decision (POST)').item.json.body.format === 'json' ? 'application/json' : 'text/html; charset=utf-8' }}"}]}},
+    })
+    wf.link(rv, find)
+    wf.link(find, page)
+    wf.link(dec, apply_)
+    wf.link(apply_, valid)
+    wf.link(valid, slack, out_index=0)
+    wf.link(valid, done, out_index=1)
+    wf.link(slack, approved)
+    wf.link(approved, sms, out_index=0)
+    wf.link(approved, done, out_index=1)
+    wf.link(sms, done)
+    wf.save("07_po_approval.json")
+
+
 if __name__ == "__main__":
     OUT_DIR.mkdir(exist_ok=True)
-    for build in (wf01, wf02, wf03, wf04, wf05, wf06):
+    for build in (wf01, wf02, wf03, wf04, wf05, wf06, wf07):
         build()

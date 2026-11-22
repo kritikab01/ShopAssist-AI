@@ -206,7 +206,7 @@ elif st != 200:
 else:
     names, updated = {}, {}
     for w in wfs.get("data", []):
-        if w["name"][:3] not in ("01 ", "02 ", "03 ", "04 ", "05 ", "06 "):
+        if w["name"][:3] not in ("01 ", "02 ", "03 ", "04 ", "05 ", "06 ", "07 "):
             continue
         names[w["id"]] = w["name"]
         updated[w["id"]] = str(w.get("updatedAt") or "")
@@ -218,8 +218,8 @@ else:
         missing = [n["name"] for n in w["nodes"] if not n.get("credentials") and n["type"].split(".")[-1] in
                    ("vectorStorePinecone", "embeddingsOllama", "lmChatOllama", "postgres", "postgresTool",
                     "memoryPostgresChat", "slack", "twilio", "emailSend")]
-        if not w.get("active") and w["name"][:2] in ("03", "04", "05", "06"):
-            todo.append(f"Publish workflow {w['name'][:2]} in n8n (order: 04, 06, then 03, 05)")
+        if not w.get("active") and w["name"][:2] in ("03", "04", "05", "06", "07"):
+            todo.append(f"Publish workflow {w['name'][:2]} in n8n (order: 04, 06, then 03, 05, 07)")
         print(f"   {w['name'][:44]:44} AI={ai:13} {'published' if w.get('active') else 'not published':13}"
               f"{' missing credential: ' + ', '.join(missing) if missing else ''}")
     st, creds = http("GET", f"{n8n}/api/v1/credentials?limit=100", H)

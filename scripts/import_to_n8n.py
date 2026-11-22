@@ -1,4 +1,4 @@
-"""Create or update all 5 ShopAssist workflows in your n8n with one command (n8n public API).
+"""Create or update all 7 ShopAssist workflows in your n8n with one command (n8n public API).
 
 Run this ON YOUR OWN COMPUTER (where n8n runs), from the repo folder:
 
@@ -6,7 +6,7 @@ Run this ON YOUR OWN COMPUTER (where n8n runs), from the repo folder:
     python3 scripts/import_to_n8n.py     # reads N8N_URL / N8N_API_KEY / OLLAMA_URL from .env
 
 What it does:
-  1. workflow 04 (escalation) and 06 (inventory agent) first, then 03, 01, 02, 05;
+  1. workflow 04 (escalation) and 06 (inventory agent) first, then 03, 01, 02, 05, 07;
   2. if a workflow with the same name already exists it is UPDATED in place (same ID, same URL)
      and every node keeps the credential you already selected (matched by node name);
      otherwise it is created;
@@ -26,7 +26,8 @@ from pathlib import Path
 
 WF_DIR = Path(__file__).resolve().parent.parent / "workflows"
 ORDER = ["04_escalation_subworkflow.json", "06_inventory_agent.json", "03_support_agent_chat.json",
-         "01_ingest_faq_pdf.json", "02_scrape_and_summarize.json", "05_order_update_webhook.json"]
+         "01_ingest_faq_pdf.json", "02_scrape_and_summarize.json", "05_order_update_webhook.json",
+         "07_po_approval.json"]
 # Agent tools in 03 that call another workflow: tool node name -> workflow file it must point to.
 LINKS = {"escalate_to_human": "04_escalation_subworkflow.json", "Create Ticket (workflow 04)": "04_escalation_subworkflow.json", "inventory_expert": "06_inventory_agent.json"}
 
@@ -39,6 +40,8 @@ if _env.exists():
             os.environ.setdefault(_k.strip(), _v.split(" #")[0].strip().strip('"').strip("'"))
 
 base = os.environ.get("N8N_URL", "http://localhost:5679").rstrip("/")
+# Address of n8n for people's browsers (approval links in Slack): a tunnel or cloud URL if you have one.
+public = (os.environ.get("N8N_PUBLIC_URL") or base).rstrip("/")
 key = os.environ.get("N8N_API_KEY")
 if not key:
     sys.exit("Set N8N_API_KEY first (n8n -> Settings -> n8n API -> Create an API key).")
@@ -118,6 +121,24 @@ if "ollamaApi" not in by_type:
     except ApiError as e:
         print(f"note: could not create the Ollama credential ({e}); create it in n8n: Credentials -> Ollama.")
 
+# Postgres credential from .env (POSTGRES_*), so you do not have to type it into n8n. POSTGRES_HOST_FOR_N8N
+# overrides the host as n8n sees it (e.g. "postgres" when both run in docker compose).
+if "postgres" not in by_type and os.environ.get("POSTGRES_HOST") and os.environ.get("POSTGRES_PASSWORD"):
+    ssl = (os.environ.get("POSTGRES_SSL") or "require").lower()
+    ssl = "disable" if ssl in ("disable", "false", "0") else "require"
+    try:
+        create_credential("Supabase Postgres", "postgres", {
+            "host": os.environ.get("POSTGRES_HOST_FOR_N8N") or os.environ["POSTGRES_HOST"],
+            "port": int(os.environ.get("POSTGRES_PORT") or 5432),
+            "database": os.environ.get("POSTGRES_DB") or "postgres",
+            "user": os.environ.get("POSTGRES_USER") or "postgres",
+            "password": os.environ["POSTGRES_PASSWORD"],
+            "ssl": ssl, "allowUnauthorizedCerts": ssl == "require", "maxConnections": 10,
+        })
+        print("created  Postgres credential from .env (POSTGRES_*)")
+    except ApiError as e:
+        print(f"note: could not create the Postgres credential ({e}); create it in n8n: Credentials -> Postgres.")
+
 # n8n 2.x refuses to PUBLISH a workflow while any node lacks a credential. Until you set up Slack, Twilio
 # and Gmail (Part B), placeholder credentials let you publish 04/05; those three steps just fail softly.
 PLACEHOLDERS = {
@@ -140,7 +161,7 @@ for t, cs in by_type.items():
 
 ids = {}  # workflow file -> id in n8n
 for filename in ORDER:
-    wf = json.loads((WF_DIR / filename).read_text(encoding="utf-8"))
+    wf = json.loads((WF_DIR / filename).read_text(encoding="utf-8").replace("__N8N_PUBLIC_URL__", public))
     old = existing.get(wf["name"])
     old_creds = {n["name"]: n["credentials"] for n in (old or {}).get("nodes", []) if n.get("credentials")}
     for node in wf["nodes"]:
