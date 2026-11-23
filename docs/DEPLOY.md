@@ -70,3 +70,28 @@ the public link. Ctrl+C ends it. While the link is public:
 Limits of the free plans: Render free instances sleep after 15 minutes without traffic and have 512 MB RAM;
 the Groq free tier allows a limited number of tokens per day (plenty for demos). For real traffic, use a paid
 instance or n8n Cloud.
+
+---
+
+## D. Vercel (the live link)
+
+**Live URL: https://shopassistai.vercel.app** (Vercel project `shop.assist.ai`). Vercel is connected to this
+GitHub repo: every merge into `main` is deployed to production automatically, and every other branch gets
+its own preview URL. There is nothing to "update" by hand. Merge the pull request, wait about a minute, and the
+link shows the new version. Check under Vercel → project → **Deployments**: the top *Production* entry should show
+the latest `main` commit.
+
+Vercel hosts only the **web app** (`app/server.py`, with `requirements.txt` for its database driver). n8n and the
+AI do not run on Vercel, so the app needs these **Environment Variables** (Vercel → project → Settings →
+Environment Variables → Production), followed by a **Redeploy**:
+
+| Name | Value |
+|---|---|
+| `N8N_URL` | a public address of your n8n, e.g. the Render n8n (`https://shopassist-n8n.onrender.com`, section C) or a tunnel to your Mac (`cloudflared tunnel --url http://localhost:5679`) |
+| `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | your Supabase *Session pooler* values (same as in `.env`) |
+| `POSTGRES_SSL` | `require` |
+| `ADMIN_KEY` | a long random string: it locks the Ops HQ dashboard, which is otherwise public |
+
+Without them the page loads, but the chat shows an error and Ops HQ shows "database not available". Check after a
+redeploy: `https://shopassistai.vercel.app/api/status` should show `"n8n": true, "db": true`.
+
