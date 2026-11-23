@@ -68,7 +68,7 @@ flowchart LR
     W02 -->|"namespace website"| PC
 
     C(["Customer<br/>web app · n8n chat"]) --> GI["Detect Intent<br/>(rules: anger, sarcasm,<br/>Hinglish, identity)"]
-    GI --> AG["03 ShopAssist Agent<br/>Ollama qwen2.5 / Groq Llama 3.3"]
+    GI --> AG["03 ShopAssist Agent<br/>Ollama qwen2.5 / Groq gpt-oss-120b"]
     AG <-->|"faq / website_knowledge"| PC
     AG <-->|"order_lookup + phone check"| PG[("Postgres<br/>orders · tickets · memory<br/>stock · POs · events")]
     AG <-->|"inventory_expert"| W06["06 Inventory Agent<br/>stock_lookup · create_purchase_order"]
@@ -237,7 +237,7 @@ All 17 with expected behaviour: [`docs/test_questions.md`](docs/test_questions.m
 | Layer | Local | Cloud |
 |---|---|---|
 | Orchestration | n8n 2.48 (Docker) | n8n on Render, data in Supabase schema `n8n` |
-| Chat model | Ollama `qwen2.5:3b` (tool calling) | Groq `llama-3.3-70b-versatile` |
+| Chat model | Ollama `qwen2.5:3b` (tool calling) | Groq `openai/gpt-oss-120b` |
 | Embeddings | Ollama `nomic-embed-text` (768) | Cohere `embed-multilingual-v3.0` (1024) |
 | Vector DB | Pinecone index `shopassist`, namespaces `faq` / `website` | Pinecone `shopassist-cloud` |
 | Database + memory | Postgres 16 / Supabase | Supabase |

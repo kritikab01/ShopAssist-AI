@@ -4,7 +4,7 @@
 |---|---|---|---|
 | What runs where | everything on your computer | your computer + a temporary public link | n8n + web app on Render, AI on Groq/Cohere, data on Supabase/Pinecone |
 | Cost | free | free, no account | free plans |
-| AI model | Ollama `qwen2.5:3b` (local) | same | Groq `llama-3.3-70b-versatile` + Cohere multilingual embeddings |
+| AI model | Ollama `qwen2.5:3b` (local) | same | Groq `openai/gpt-oss-120b` + Cohere multilingual embeddings |
 | Works when laptop is off | no | no | **yes** (free instances sleep after 15 min; first request wakes them, ~1 min) |
 | Best for | development, offline demo | live demo in an interview | a link on your CV / LinkedIn |
 
@@ -56,7 +56,7 @@ the public link. Ctrl+C ends it. While the link is public:
 |---|---|---|
 | Web app (chat + Ops HQ) | Vercel project `shop.assist.ai`, auto-deployed from `main` | free |
 | n8n (the 7 workflows) | Render web service `shopassist-n8n` (`render.yaml`); its own data in Supabase schema `n8n` | free |
-| Chat AI / embeddings | Groq `llama-3.3-70b-versatile` / Cohere `embed-multilingual-v3.0` | free tiers |
+| Chat AI / embeddings | Groq `openai/gpt-oss-120b` / Cohere `embed-multilingual-v3.0` | free tiers |
 | Data | Supabase project `shopassist`, Pinecone index `shopassist-cloud` (1024 dims) | free |
 
 **Easiest way to fill `.env`:** run `bash scripts/set_keys.sh`. It opens each key page, asks you to paste the
