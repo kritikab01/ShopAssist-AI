@@ -131,12 +131,12 @@
     },
     {
       "parameters": {
-        "content": "## Test with curl\n```\ncurl -X POST \\\n  https://YOUR-N8N.app.n8n.cloud/webhook-test/order-update \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"order_id\":\"UT1002\",\"status\":\"delayed\",\"new_expected_delivery\":\"2026-10-15\"}'\n```\nUse `/webhook-test/` while testing in the editor, `/webhook/` after activating.\nUnknown order IDs return `ok: false` (Postgres node has *Always Output Data* on).",
+        "content": "## How to test\nPOST JSON to `https://YOUR-N8N/webhook-test/order-update`, body:\n`{\"order_id\":\"UT1002\",\"status\":\"delayed\",\"new_expected_delivery\":\"2026-10-15\"}`\n(Full command: docs/test_questions.md.)\nUse `/webhook-test/` while testing in the editor, `/webhook/` after activating.\nUnknown order IDs return `ok: false` (Postgres node has *Always Output Data* on).",
         "width": 480,
         "height": 300
       },
-      "id": "8c0696dc-0e6c-5b1e-a4ec-5cad6ee73b88",
-      "name": "Test with curl",
+      "id": "53dd9393-e485-513e-a031-0c353384cbb1",
+      "name": "How to test",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [

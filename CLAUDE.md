@@ -29,6 +29,9 @@ Capstone project: n8n customer-support agent for a fictional store (UrbanThread)
   scripts/cloud_setup.sh imports --cloud using CLOUD_N8N_URL / CLOUD_N8N_API_KEY from .env. Tools: set_keys.sh (prompts for cloud keys, writes .env), setup_database.py, import_to_n8n.py, doctor.py,
   test_chat.py, chat_cli.py (interactive), evaluate.py (14 scored tests), kpi_report.py, app/server.py
   (web app :8501, chat + live dashboard; posts to N8N_URL so n8n's WEBHOOK_URL port problem does not matter).
+- Render's web firewall returns 403 <title>Blocked</title> for API uploads containing a curl command line
+  (05's sticky note had one; now plain words). import_to_n8n.py retries 503 'Database is not ready!' (cloud n8n
+  first start against Supabase Seoul from Render US took ~15 min).
 - Known user issue: n8n in Docker `-p 5679:5678` without WEBHOOK_URL -> n8n's own chat window posts to 5678
   ("Failed to receive response", empty Logs). Fix: WEBHOOK_URL=http://localhost:5679/ (RUNBOOK step 9).
 - `scripts/verify_setup.py` is read-only: .env, n8n credentials (self-test), Ollama, Pinecone 768, Supabase.

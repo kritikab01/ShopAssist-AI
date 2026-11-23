@@ -25,6 +25,7 @@ Options:
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -63,13 +64,23 @@ def api(method, path, body=None):
         f"{base}/api/v1{path}", method=method,
         data=json.dumps(body).encode() if body is not None else None,
         headers={"X-N8N-API-KEY": key, "Content-Type": "application/json", "Accept": "application/json"})
-    try:
-        with urllib.request.urlopen(req) as r:
-            return json.load(r)
-    except urllib.error.HTTPError as e:
-        raise ApiError(f"HTTP {e.code} {e.read().decode()[:400]}")
-    except urllib.error.URLError as e:
-        sys.exit(f"Cannot reach n8n at {base}: {e.reason}. Is n8n running? Is N8N_URL right?")
+    for attempt in range(8):
+        try:
+            with urllib.request.urlopen(req) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            text = e.read().decode(errors="replace")
+            # A cloud n8n that is still starting (or catching up with a slow database) answers 503
+            # "Database is not ready!" before it handles the request, so it is safe to send it again.
+            if e.code == 503 and attempt < 7:
+                print("       n8n is not ready yet (503), retrying in 10 s ...", flush=True)
+                time.sleep(10)
+                continue
+            if e.code == 403 and "<title>Blocked</title>" in text:
+                raise ApiError("HTTP 403 blocked by the hosting provider's web firewall (not by n8n)")
+            raise ApiError(f"HTTP {e.code} {text[:400]}")
+        except urllib.error.URLError as e:
+            sys.exit(f"Cannot reach n8n at {base}: {e.reason}. Is n8n running? Is N8N_URL right?")
 
 
 # Existing workflows by name (to update instead of creating duplicates).
