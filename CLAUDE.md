@@ -23,7 +23,8 @@ Capstone project: n8n customer-support agent for a fictional store (UrbanThread)
   expected schema - Required conversation_summary'); agent node is onError continue, and 'Needs a Ticket?' builds
   a reply from the order row / rules when the agent fails. doctor.py hides failed runs older than the workflow's
   updatedAt and shows Pinecone vector count (3c) when PINECONE_API_KEY is in .env.
-- Runbook for the user: `docs/RUNBOOK.md`. Tools: setup_database.py, import_to_n8n.py, doctor.py,
+- Runbook for the user: `docs/RUNBOOK.md`. One-command Mac start: `scripts/start.sh` (Ollama, n8n container
+  shopassist-n8n, DB, import --publish, doctor, app :8501). Vercel deployment was removed (Nov 2026). Tools: setup_database.py, import_to_n8n.py, doctor.py,
   test_chat.py, chat_cli.py (interactive), evaluate.py (14 scored tests), kpi_report.py, app/server.py
   (web app :8501, chat + live dashboard; posts to N8N_URL so n8n's WEBHOOK_URL port problem does not matter).
 - Known user issue: n8n in Docker `-p 5679:5678` without WEBHOOK_URL -> n8n's own chat window posts to 5678
