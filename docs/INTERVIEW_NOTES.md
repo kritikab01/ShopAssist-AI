@@ -33,7 +33,7 @@
 | Decision | Why | Trade-off |
 |---|---|---|
 | n8n instead of Python/LangChain | visual, business users can read it, built-in Slack/Twilio/Postgres nodes | workflow JSON is hard to diff → I **generate** it from Python (`build_workflows.py`) and test it |
-| Local Ollama model (qwen2.5 3B) | free, private, no API blocks (Google refused my Gemini keys) | slower, weaker → guardrails; cloud profile with Groq Llama 3.3 70B |
+| Local Ollama model (qwen2.5 3B) | free, private, no API blocks (Google refused my Gemini keys) | slower, weaker → guardrails; cloud profile with Groq gpt-oss-120b |
 | Two knowledge bases (FAQ vs website) | policies are authoritative, web pages are marketing; the agent chooses (agentic RAG) and cites the source | two retrieval calls for mixed questions |
 | Summarise scraped pages before embedding | raw HTML is noisy; summaries keep facts (codes, dates, ₹) and retrieve better | an LLM call per page at ingestion |
 | Namespace per knowledge base, cleared on each run | re-ingestion replaces instead of duplicating | a run briefly empties that knowledge base |

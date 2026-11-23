@@ -23,6 +23,8 @@ Capstone project: n8n customer-support agent for a fictional store (UrbanThread)
   expected schema - Required conversation_summary'); agent node is onError continue, and 'Needs a Ticket?' builds
   a reply from the order row / rules when the agent fails. doctor.py hides failed runs older than the workflow's
   updatedAt and shows Pinecone vector count (3c) when PINECONE_API_KEY is in .env.
+- Local is the main path (user found the Render free tier too slow): README 'Run it on your laptop'; start.sh creates
+  container shopassist-n8n (127.0.0.1:5679, volume shopassist_n8n_data) if missing. Cloud stays optional.
 - Runbook for the user: `docs/RUNBOOK.md`. One-command Mac start: `scripts/start.sh` (Ollama, n8n container
   shopassist-n8n, DB, import --publish, doctor, app :8501). Cloud 24/7 (Nov 2026): app on Vercel project shop.assist.ai
   (shopassistai.vercel.app, needs pg8000 in pyproject.toml + N8N_URL env), n8n on Render (render.yaml, n8n only),

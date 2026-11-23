@@ -28,7 +28,7 @@ NUM_CTX = 8192  # Ollama's default context (2048 tokens) is too small for the ag
 # Cloud profile (python3 scripts/build_workflows.py --cloud -> workflows/cloud/*.json), for hosting without a
 # laptop: Groq (free API, fast Llama models with tool calling) for chat and Cohere multilingual embeddings
 # (free trial key, 1024 dims, also understands Hindi) -> its own Pinecone index "shopassist-cloud" (1024 dims).
-CLOUD = {"chat_model": "llama-3.3-70b-versatile", "embed_model": "embed-multilingual-v3.0",
+CLOUD = {"chat_model": "openai/gpt-oss-120b", "embed_model": "embed-multilingual-v3.0",
          "index": "shopassist-cloud", "dimension": 1024}
 PROFILE = "local"  # set by main(): "local" (Ollama) or "cloud" (Groq + Cohere)
 

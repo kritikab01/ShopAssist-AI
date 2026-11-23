@@ -115,7 +115,7 @@ def judge(question, expected, answer):
     prompt = JUDGE_PROMPT.format(q=question, e=expected, a=answer)
     if (ENV.get("JUDGE_PROVIDER") or ("groq" if ENV.get("GROQ_API_KEY") else "ollama")) == "groq":
         st, r, _ = http("POST", "https://api.groq.com/openai/v1/chat/completions", {
-            "model": ENV.get("JUDGE_MODEL") or "llama-3.3-70b-versatile", "temperature": 0,
+            "model": ENV.get("JUDGE_MODEL") or "openai/gpt-oss-120b", "temperature": 0,
             "response_format": {"type": "json_object"}, "messages": [{"role": "user", "content": prompt}]},
             {"Authorization": f"Bearer {ENV.get('GROQ_API_KEY', '')}"}, timeout=60)
         return parse_judge(r["choices"][0]["message"]["content"]) if st == 200 else None
