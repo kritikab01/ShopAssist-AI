@@ -16,10 +16,11 @@ and pings a human the second a customer gets upset.*
 
 **7 n8n workflows · 2 AI agents · 2 knowledge bases · 58 automated tests · runs for ₹0**
 
-### ▶️ Open the app: **[http://localhost:8501](http://localhost:8501)**
+### 🌐 Live app: **[shopassistai.vercel.app](https://shopassistai.vercel.app)**
 
-<sub>The app runs on your own laptop. Start everything first with <code>bash scripts/start.sh</code>
-(see <a href="#run-it">Run it</a>), then click the link.</sub>
+<sub>Runs 24/7 in the cloud (Vercel + n8n on Render + Groq). The first message after a quiet spell can take about a minute
+while the free server wakes up. On your own laptop: <code>bash scripts/start.sh</code>, then
+<a href="http://localhost:8501">localhost:8501</a>. Setup: <a href="docs/DEPLOY.md">docs/DEPLOY.md</a>, section C.</sub>
 
 <img src="docs/screenshots/app_chat.png" alt="ShopAssist customer chat: order verified with phone digits, delay shown with status badges, Diwali coupon code" width="100%">
 
@@ -151,7 +152,7 @@ knowledge base. Step-by-step detail with what you should see each time: [`docs/R
 |---|---|---|
 | 🐳 **Everything in Docker** | `bash scripts/up.sh` | Postgres (with data) + n8n + web app, imports and publishes all workflows |
 | 🔗 **Public demo link** | `bash scripts/share_demo.sh` | free Cloudflare tunnel to the web app only; dashboard protected by `ADMIN_KEY` |
-| ☁️ **Cloud, no laptop** | Render blueprint + `import_to_n8n.py --cloud --publish` | Groq (Llama 3.3 70B) + Cohere multilingual embeddings + Supabase + Pinecone |
+| ☁️ **Cloud, no laptop** | Render blueprint + `bash scripts/cloud_setup.sh` + Vercel | Groq (Llama 3.3 70B) + Cohere multilingual embeddings + Supabase + Pinecone |
 | 💻 Existing local n8n | see [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | step by step, with what you should see after each step |
 
 Full guide: **[`docs/DEPLOY.md`](docs/DEPLOY.md)**. Local AI needs the [Ollama](https://ollama.com) app and
