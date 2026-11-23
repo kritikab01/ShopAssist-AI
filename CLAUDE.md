@@ -26,7 +26,7 @@ Capstone project: n8n customer-support agent for a fictional store (UrbanThread)
 - Runbook for the user: `docs/RUNBOOK.md`. One-command Mac start: `scripts/start.sh` (Ollama, n8n container
   shopassist-n8n, DB, import --publish, doctor, app :8501). Cloud 24/7 (Nov 2026): app on Vercel project shop.assist.ai
   (shopassistai.vercel.app, needs pg8000 in pyproject.toml + N8N_URL env), n8n on Render (render.yaml, n8n only),
-  scripts/cloud_setup.sh imports --cloud using CLOUD_N8N_URL / CLOUD_N8N_API_KEY from .env. Tools: setup_database.py, import_to_n8n.py, doctor.py,
+  scripts/cloud_setup.sh imports --cloud using CLOUD_N8N_URL / CLOUD_N8N_API_KEY from .env. Tools: set_keys.sh (prompts for cloud keys, writes .env), setup_database.py, import_to_n8n.py, doctor.py,
   test_chat.py, chat_cli.py (interactive), evaluate.py (14 scored tests), kpi_report.py, app/server.py
   (web app :8501, chat + live dashboard; posts to N8N_URL so n8n's WEBHOOK_URL port problem does not matter).
 - Known user issue: n8n in Docker `-p 5679:5678` without WEBHOOK_URL -> n8n's own chat window posts to 5678

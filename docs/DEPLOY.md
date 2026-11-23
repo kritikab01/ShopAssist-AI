@@ -59,6 +59,10 @@ the public link. Ctrl+C ends it. While the link is public:
 | Chat AI / embeddings | Groq `llama-3.3-70b-versatile` / Cohere `embed-multilingual-v3.0` | free tiers |
 | Data | Supabase project `shopassist`, Pinecone index `shopassist-cloud` (1024 dims) | free |
 
+**Easiest way to fill `.env`:** run `bash scripts/set_keys.sh`. It opens each key page, asks you to paste the
+key (hidden), writes it on the right line of `.env`, shows the values Render asks for (database password copied
+to the clipboard), and ends with an OK/MISSING list. Steps 1–3 below are the same thing by hand.
+
 1. **Keys** (free): Groq → https://console.groq.com/keys. Cohere → https://dashboard.cohere.com/api-keys.
    Put them in `.env` as `GROQ_API_KEY=` and `COHERE_API_KEY=`.
 2. **n8n on Render**: https://dashboard.render.com → **New → Blueprint** → connect GitHub → pick this repo → it

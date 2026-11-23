@@ -152,7 +152,7 @@ knowledge base. Step-by-step detail with what you should see each time: [`docs/R
 |---|---|---|
 | 🐳 **Everything in Docker** | `bash scripts/up.sh` | Postgres (with data) + n8n + web app, imports and publishes all workflows |
 | 🔗 **Public demo link** | `bash scripts/share_demo.sh` | free Cloudflare tunnel to the web app only; dashboard protected by `ADMIN_KEY` |
-| ☁️ **Cloud, no laptop** | Render blueprint + `bash scripts/cloud_setup.sh` + Vercel | Groq (Llama 3.3 70B) + Cohere multilingual embeddings + Supabase + Pinecone |
+| ☁️ **Cloud, no laptop** | `bash scripts/set_keys.sh` + Render blueprint + `bash scripts/cloud_setup.sh` + Vercel | Groq (Llama 3.3 70B) + Cohere multilingual embeddings + Supabase + Pinecone |
 | 💻 Existing local n8n | see [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | step by step, with what you should see after each step |
 
 Full guide: **[`docs/DEPLOY.md`](docs/DEPLOY.md)**. Local AI needs the [Ollama](https://ollama.com) app and
