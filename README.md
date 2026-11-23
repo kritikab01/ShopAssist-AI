@@ -16,11 +16,6 @@ and pings a human the second a customer gets upset.*
 
 **7 n8n workflows · 2 AI agents · 2 knowledge bases · 58 automated tests · runs for ₹0**
 
-### 🌐 Live app: **[shopassistai.vercel.app](https://shopassistai.vercel.app)**
-
-<sub>Hosted on Vercel, redeployed automatically from <code>main</code>. The chat answers when the n8n backend is online
-(see <a href="docs/DEPLOY.md#d-vercel-the-live-link">docs/DEPLOY.md</a>).</sub>
-
 <img src="docs/screenshots/app_chat.png" alt="ShopAssist customer chat: order verified with phone digits, delay shown with status badges, Diwali coupon code" width="100%">
 
 </div>
