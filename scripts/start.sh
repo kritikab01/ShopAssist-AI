@@ -9,6 +9,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 N8N_CONTAINER="${N8N_CONTAINER:-shopassist-n8n}"
+N8N_IMAGE="${N8N_IMAGE:-2.48.7}"
 ok()   { printf '  \033[32mOK\033[0m   %s\n' "$1"; }
 fail() { printf '  \033[31mFAIL\033[0m %s\n' "$1"; exit 1; }
 wait_for() {  # wait_for URL SECONDS
@@ -35,9 +36,27 @@ if ! curl -s -m 2 -o /dev/null http://localhost:5679/healthz; then
   docker info >/dev/null 2>&1 || { open -a Docker 2>/dev/null || true; echo "       waiting for Docker Desktop ..."; \
     for _ in $(seq 1 60); do docker info >/dev/null 2>&1 && break; sleep 2; done; }
   docker info >/dev/null 2>&1 || fail "Docker Desktop is not running. Open it and run this again."
-  docker start "$N8N_CONTAINER" >/dev/null 2>&1 \
-    || fail "n8n container '$N8N_CONTAINER' not found. See: docker ps -a   then: N8N_CONTAINER=<name> bash scripts/start.sh"
-  wait_for http://localhost:5679/healthz 60 || fail "n8n did not start. Check: docker logs $N8N_CONTAINER"
+  if docker inspect "$N8N_CONTAINER" >/dev/null 2>&1; then
+    docker start "$N8N_CONTAINER" >/dev/null || fail "could not start the n8n container '$N8N_CONTAINER'. Check: docker logs $N8N_CONTAINER"
+  else
+    # First run on this Mac: create the n8n container (its data lives in the Docker volume shopassist_n8n_data).
+    echo "       no container '$N8N_CONTAINER' yet, creating it (n8n $N8N_IMAGE, first download takes a few minutes)"
+    echo "       (already have n8n under another name? Ctrl+C, then: N8N_CONTAINER=<name> bash scripts/start.sh)"
+    docker run -d --name "$N8N_CONTAINER" --restart unless-stopped \
+      -p 127.0.0.1:5679:5678 \
+      -e WEBHOOK_URL=http://localhost:5679/ -e N8N_SECURE_COOKIE=false \
+      -e GENERIC_TIMEZONE=Asia/Kolkata -e N8N_DIAGNOSTICS_ENABLED=false \
+      -v shopassist_n8n_data:/home/node/.n8n \
+      "n8nio/n8n:$N8N_IMAGE" >/dev/null || fail "could not create the n8n container (see the Docker message above)"
+    NEW_N8N=1
+  fi
+  wait_for http://localhost:5679/healthz 120 || fail "n8n did not start. Check: docker logs $N8N_CONTAINER"
+  if [ -n "${NEW_N8N:-}" ]; then
+    echo
+    echo "  n8n is new on this Mac. Open http://localhost:5679, create your login, then"
+    echo "  Settings -> n8n API -> Create an API key. Put it in .env as N8N_API_KEY=... and run this again."
+    exit 0
+  fi
 fi
 ok "n8n is up"
 

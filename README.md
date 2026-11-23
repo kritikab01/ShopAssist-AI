@@ -16,11 +16,11 @@ and pings a human the second a customer gets upset.*
 
 **7 n8n workflows · 2 AI agents · 2 knowledge bases · 58 automated tests · runs for ₹0**
 
-### 🌐 Live app: **[shopassistai.vercel.app](https://shopassistai.vercel.app)**
+### 💻 Run it on your laptop: `bash scripts/start.sh` → **[http://localhost:8501](http://localhost:8501)**
 
-<sub>Runs 24/7 in the cloud (Vercel + n8n on Render + Groq). The first message after a quiet spell can take about a minute
-while the free server wakes up. On your own laptop: <code>bash scripts/start.sh</code>, then
-<a href="http://localhost:8501">localhost:8501</a>. Setup: <a href="docs/DEPLOY.md">docs/DEPLOY.md</a>, section C.</sub>
+<sub>Recommended way: everything runs on your Mac (n8n in Docker + Ollama), free and fast. Chat in the browser or in the
+Terminal (<code>python3 scripts/chat_cli.py</code>). Step by step: <a href="#run-it-on-your-laptop-recommended">Run it</a>.
+Optional cloud copy: <a href="https://shopassistai.vercel.app">shopassistai.vercel.app</a> (free servers, can be slow or asleep).</sub>
 
 <img src="docs/screenshots/app_chat.png" alt="ShopAssist customer chat: order verified with phone digits, delay shown with status badges, Diwali coupon code" width="100%">
 
@@ -122,41 +122,86 @@ That one design decision took the evaluation from 9/14 to 14/14.
 **📈 Business KPIs** (live in Ops HQ, `scripts/kpi_report.py`): share solved without a human, CSAT from 👍/👎,
 tickets by type, sentiment and language, low-stock SKUs, POs pending and decided, blocked identity checks.
 
-## Run it
+## Run it on your laptop (recommended)
 
-### Quick start on a Mac (the normal way)
+Everything runs on your Mac: **n8n** in Docker on http://localhost:5679, the AI in **Ollama**, the data in Supabase +
+Pinecone, and the web app on **http://localhost:8501**. No cloud server needed, no waiting for one to wake up.
 
-You need: Docker Desktop with your n8n container (`shopassist-n8n`, port 5679), the [Ollama](https://ollama.com) app,
-and a filled-in `.env` (copy `.env.example`). Then, in Terminal inside the project folder:
+### What you need (once)
+
+| | How |
+|---|---|
+| Docker Desktop | [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/), open it once |
+| Ollama | [ollama.com](https://ollama.com), open the app (`start.sh` downloads the two models) |
+| Python 3 | already on a Mac (`python3 --version`) |
+| `.env` file | `cp .env.example .env`, then fill in `POSTGRES_*` (Supabase), `PINECONE_API_KEY`, `N8N_API_KEY` (below) |
+
+### First time only
+
+1. **Get the code** and go into the folder:
+   ```bash
+   git clone https://github.com/kritikab01/ShopAssist-AI.git && cd ShopAssist-AI
+   ```
+2. **Start everything** (creates the n8n container `shopassist-n8n` on port 5679 if you don't have one yet):
+   ```bash
+   bash scripts/start.sh
+   ```
+   On a new n8n it stops after step 3 and asks for an API key. That is expected: do step 3, then run it again.
+3. **n8n login + API key:** open http://localhost:5679, create your login, then **Settings → n8n API → Create an API key**.
+   Put it in `.env` as `N8N_API_KEY=...` and run `bash scripts/start.sh` again.
+4. **Fill the knowledge base:** in n8n open workflow **01** → **Execute workflow**, then the same for **02**.
+
+### Every day
+
+In Terminal, inside the project folder:
 
 ```bash
-git checkout main && git pull
+git pull
+```
+```bash
 bash scripts/start.sh
 ```
 
-`start.sh` goes through 6 checks and prints **OK** or **FAIL** with the fix for each one:
+`start.sh` checks 6 things and prints **OK** or **FAIL** (with the fix) for each:
 
 1. `.env` is there and the database driver `pg8000` is installed
-2. Ollama is running and has `qwen2.5:3b` and `nomic-embed-text` (downloads them if missing)
-3. n8n answers on http://localhost:5679 (starts Docker Desktop and the n8n container if they are stopped)
+2. Ollama is running with `qwen2.5:3b` and `nomic-embed-text`
+3. n8n answers on http://localhost:5679 (starts Docker Desktop and the n8n container if needed)
 4. the database (Supabase) is reachable and has its tables
-5. all 7 workflows are imported and **published**, followed by the health check (`doctor.py`)
-6. the web app starts and **http://localhost:8501** opens in your browser (💬 Chat + 📊 Ops HQ)
+5. all 7 workflows are imported and **published**, then the health check (`doctor.py`)
+6. the web app starts and **http://localhost:8501** opens (💬 Chat + 📊 Ops HQ)
 
-First time only: in n8n (http://localhost:5679) open workflow **01**, then **02**, and click *Execute workflow* to fill the
-knowledge base. Step-by-step detail with what you should see each time: [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+**Keep that Terminal window open**: the app runs as long as it does. **Control + C** stops it
+(Control, not Command). If the browser says *refused to connect*, the app is not running: run `start.sh` again.
+
+### Chat from the Terminal
+
+Open a second Terminal tab (**Cmd + T**), go to the project folder, and:
+
+```bash
+python3 scripts/chat_cli.py
+```
+
+Type a question (or one word: `UT1002`, `returns`, `diwali`, `kurta`); `/new` starts a new conversation, `/quit` exits.
+To run the built-in test questions in one go: `python3 scripts/test_chat.py`. Both talk to n8n directly on
+`N8N_URL` (http://localhost:5679), so they work even without the web app.
+
+### If something fails
+
+| You see | Do this |
+|---|---|
+| `FAIL` in `start.sh` | the line under it says what to fix; then run `start.sh` again |
+| *refused to connect* on localhost:8501 | `start.sh` is not running: start it and keep the window open |
+| n8n's own chat window: *Failed to receive response* | RUNBOOK step 9 (`bash scripts/fix_webhook_url.sh`) |
+| anything else | `python3 scripts/doctor.py` (read-only check) and [`docs/RUNBOOK.md`](docs/RUNBOOK.md) |
 
 ### Other ways to run it
 
 | Option | Command | Details |
 |---|---|---|
-| 🐳 **Everything in Docker** | `bash scripts/up.sh` | Postgres (with data) + n8n + web app, imports and publishes all workflows |
-| 🔗 **Public demo link** | `bash scripts/share_demo.sh` | free Cloudflare tunnel to the web app only; dashboard protected by `ADMIN_KEY` |
-| ☁️ **Cloud, no laptop** | `bash scripts/set_keys.sh` + Render blueprint + `bash scripts/cloud_setup.sh` + Vercel | Groq (Llama 3.3 70B) + Cohere multilingual embeddings + Supabase + Pinecone |
-| 💻 Existing local n8n | see [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | step by step, with what you should see after each step |
-
-Full guide: **[`docs/DEPLOY.md`](docs/DEPLOY.md)**. Local AI needs the [Ollama](https://ollama.com) app and
-`ollama pull qwen2.5:3b && ollama pull nomic-embed-text`.
+| 🐳 **Everything in Docker** | `bash scripts/up.sh` | local Postgres (with data) + n8n + web app, imports and publishes all workflows |
+| 🔗 **Public demo link** | `bash scripts/share_demo.sh` | free Cloudflare tunnel to your local app; dashboard protected by `ADMIN_KEY` |
+| ☁️ **Cloud (optional)** | `bash scripts/set_keys.sh`, Render blueprint, `bash scripts/cloud_setup.sh` | Vercel + n8n on Render + Groq/Cohere. Free plans: slow first start, sleeps after 15 min, 512 MB memory. [`docs/DEPLOY.md`](docs/DEPLOY.md) section C |
 
 ### Everyday commands
 
