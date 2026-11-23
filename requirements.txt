@@ -1,2 +1,0 @@
-# Web app dependencies (Vercel installs these automatically; Docker uses the Dockerfile)
-pg8000==1.31.2

@@ -81,7 +81,7 @@ its own preview URL. There is nothing to "update" by hand. Merge the pull reques
 link shows the new version. Check under Vercel → project → **Deployments**: the top *Production* entry should show
 the latest `main` commit.
 
-Vercel hosts only the **web app** (`app/server.py`, with `requirements.txt` for its database driver). n8n and the
+Vercel hosts only the **web app** (`app/server.py`; its database driver `pg8000` is declared in `pyproject.toml`, which Vercel installs from). n8n and the
 AI do not run on Vercel, so the app needs these **Environment Variables** (Vercel → project → Settings →
 Environment Variables → Production), followed by a **Redeploy**:
 
