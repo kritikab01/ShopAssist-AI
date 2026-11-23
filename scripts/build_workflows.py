@@ -839,10 +839,11 @@ def wf05():
         ),
         "options": {},
     })
-    wf.sticky("Test with curl",
-              "```\ncurl -X POST \\\n  https://YOUR-N8N.app.n8n.cloud/webhook-test/order-update \\\n"
-              "  -H 'Content-Type: application/json' \\\n"
-              "  -d '{\"order_id\":\"UT1002\",\"status\":\"delayed\",\"new_expected_delivery\":\"2026-10-15\"}'\n```\n"
+    # Plain words, no shell command: Render's web firewall blocks API uploads that contain a curl command line.
+    wf.sticky("How to test",
+              "POST JSON to `https://YOUR-N8N/webhook-test/order-update`, body:\n"
+              "`{\"order_id\":\"UT1002\",\"status\":\"delayed\",\"new_expected_delivery\":\"2026-10-15\"}`\n"
+              "(Full command: docs/test_questions.md.)\n"
               "Use `/webhook-test/` while testing in the editor, `/webhook/` after activating.\n"
               "Unknown order IDs return `ok: false` (Postgres node has *Always Output Data* on).",
               (1120, -60), w=480, h=300)
