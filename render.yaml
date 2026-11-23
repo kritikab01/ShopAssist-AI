@@ -9,7 +9,7 @@ services:
     name: shopassist-n8n
     runtime: image
     image:
-      url: docker.n8n.io/n8nio/n8n:2.48.7
+      url: docker.io/n8nio/n8n:2.48.7
     plan: free
     healthCheckPath: /healthz
     envVars:
