@@ -48,25 +48,38 @@ the public link. Ctrl+C ends it. While the link is public:
 - each visitor can send 20 messages per 5 minutes, max 500 characters each;
 - all data is fictional.
 
-## C. Cloud version (Render + Groq + Cohere + Supabase + Pinecone)
+## C. Cloud version, 24/7: Vercel (web app) + Render (n8n) + Groq + Cohere + Supabase + Pinecone
 
-1. **Keys** (all free): Groq → console.groq.com → API Keys. Cohere → dashboard.cohere.com → API keys (trial).
-   Put both in `.env` (`GROQ_API_KEY`, `COHERE_API_KEY`), plus your Supabase `POSTGRES_*` and `PINECONE_API_KEY`.
-2. **Database**: `python3 scripts/setup_database.py`. This also creates the `n8n` schema where cloud n8n keeps its data.
-3. **Pinecone**: `python3 scripts/setup_pinecone.py --cloud` (index `shopassist-cloud`, 1024 dimensions; Cohere
-   vectors are a different size from Ollama's 768).
-4. **Render**: render.com → New → **Blueprint** → pick this GitHub repo (`render.yaml`). Enter the values it asks
-   for: Supabase *Session pooler* host/user/password for both services. For `WEBHOOK_URL` use
-   `https://shopassist-n8n.onrender.com/`; for `N8N_URL` use `https://shopassist-n8n.onrender.com`. The service
-   names may get a suffix, so copy the real URL from the dashboard.
-5. Open the n8n URL, create the owner account, then Settings → n8n API → create a key. In `.env` set
-   `N8N_URL` and `N8N_PUBLIC_URL` to the Render n8n URL and `N8N_API_KEY` to the key, then:
+**Live link: https://shopassistai.vercel.app**. Works with your laptop switched off.
+
+| Part | Where | Cost |
+|---|---|---|
+| Web app (chat + Ops HQ) | Vercel project `shop.assist.ai`, auto-deployed from `main` | free |
+| n8n (the 7 workflows) | Render web service `shopassist-n8n` (`render.yaml`); its own data in Supabase schema `n8n` | free |
+| Chat AI / embeddings | Groq `llama-3.3-70b-versatile` / Cohere `embed-multilingual-v3.0` | free tiers |
+| Data | Supabase project `shopassist`, Pinecone index `shopassist-cloud` (1024 dims) | free |
+
+1. **Keys** (free): Groq → https://console.groq.com/keys. Cohere → https://dashboard.cohere.com/api-keys.
+   Put them in `.env` as `GROQ_API_KEY=` and `COHERE_API_KEY=`.
+2. **n8n on Render**: https://dashboard.render.com → **New → Blueprint** → connect GitHub → pick this repo → it
+   reads `render.yaml` and asks for:
+   - `WEBHOOK_URL`: `https://shopassist-n8n.onrender.com/` (if Render gives the service another name, use its URL, with the slash)
+   - `DB_POSTGRESDB_HOST`, `DB_POSTGRESDB_USER`, `DB_POSTGRESDB_PASSWORD`: the same Supabase values as
+     `POSTGRES_HOST`, `POSTGRES_USER`, `POSTGRES_PASSWORD` in your `.env` (Session pooler)
+
+   Click **Apply**, wait until the service is **Live** (3–5 minutes).
+3. **n8n account + API key**: open the Render n8n URL → create the owner account → Settings → **n8n API** →
+   **Create an API key**. In `.env` set `CLOUD_N8N_URL=` (the URL, no slash) and `CLOUD_N8N_API_KEY=` (the key).
+4. **One command** on your laptop:
    ```bash
-   python3 scripts/import_to_n8n.py --cloud --publish
+   bash scripts/cloud_setup.sh
    ```
-6. In n8n run workflow 01, then 02. Open the **shopassist-app** URL. The dashboard key is in Render → shopassist-app →
-   Environment → `ADMIN_KEY`.
+   It checks the keys, wakes n8n up, prepares Supabase and Pinecone, and imports + publishes the 7 cloud
+   workflows. Each step prints OK or FAIL.
+5. In the Render n8n: open workflow **01** → **Execute workflow**, then **02** (fills the knowledge base once).
+6. **Vercel** → project `shop.assist.ai` → Settings → Environment Variables → add `N8N_URL` = the Render n8n URL
+   (Production) → Deployments → **Redeploy**. The Supabase `POSTGRES_*` and `ADMIN_KEY` variables are already there.
+   Check https://shopassistai.vercel.app/api/status: `"n8n": true, "db": true`.
 
-Limits of the free plans: Render free instances sleep after 15 minutes without traffic and have 512 MB RAM;
-the Groq free tier allows a limited number of tokens per day (plenty for demos). For real traffic, use a paid
-instance or n8n Cloud.
+Free-plan limits: the Render instance sleeps after 15 minutes without traffic, so the first chat message after a
+pause takes about a minute (the next ones are fast). Groq's free tier has a daily token limit (plenty for demos).
