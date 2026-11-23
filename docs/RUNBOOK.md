@@ -6,6 +6,9 @@ Do the steps **in order**. Each step says what you should see. If something fail
 All commands run in Terminal inside the project folder:
 `cd ~/projects/shopassist-n8n/ShopAssist-AI/ShopAssist-AI`
 
+**Shortcut:** `bash scripts/start.sh` runs steps 1, 2, 3 and 7 for you (and starts Ollama, Docker and n8n if they are
+stopped). It prints OK/FAIL for each part, so you can see exactly what is broken.
+
 ## 0. Get the latest code
 ```bash
 git fetch origin && git checkout main && git pull   # (or the branch you were given)

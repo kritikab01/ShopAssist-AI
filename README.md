@@ -16,10 +16,10 @@ and pings a human the second a customer gets upset.*
 
 **7 n8n workflows · 2 AI agents · 2 knowledge bases · 58 automated tests · runs for ₹0**
 
-### 🌐 Live app: **[shopassistai.vercel.app](https://shopassistai.vercel.app)**
+### ▶️ Open the app: **[http://localhost:8501](http://localhost:8501)**
 
-<sub>Hosted on Vercel, redeployed automatically from <code>main</code>. The chat answers when the n8n backend is online
-(see <a href="docs/DEPLOY.md#d-vercel-the-live-link">docs/DEPLOY.md</a>).</sub>
+<sub>The app runs on your own laptop. Start everything first with <code>bash scripts/start.sh</code>
+(see <a href="#run-it">Run it</a>), then click the link.</sub>
 
 <img src="docs/screenshots/app_chat.png" alt="ShopAssist customer chat: order verified with phone digits, delay shown with status badges, Diwali coupon code" width="100%">
 
@@ -122,6 +122,30 @@ That one design decision took the evaluation from 9/14 to 14/14.
 tickets by type, sentiment and language, low-stock SKUs, POs pending and decided, blocked identity checks.
 
 ## Run it
+
+### Quick start on a Mac (the normal way)
+
+You need: Docker Desktop with your n8n container (`shopassist-n8n`, port 5679), the [Ollama](https://ollama.com) app,
+and a filled-in `.env` (copy `.env.example`). Then, in Terminal inside the project folder:
+
+```bash
+git checkout main && git pull
+bash scripts/start.sh
+```
+
+`start.sh` goes through 6 checks and prints **OK** or **FAIL** with the fix for each one:
+
+1. `.env` is there and the database driver `pg8000` is installed
+2. Ollama is running and has `qwen2.5:3b` and `nomic-embed-text` (downloads them if missing)
+3. n8n answers on http://localhost:5679 (starts Docker Desktop and the n8n container if they are stopped)
+4. the database (Supabase) is reachable and has its tables
+5. all 7 workflows are imported and **published**, followed by the health check (`doctor.py`)
+6. the web app starts and **http://localhost:8501** opens in your browser (💬 Chat + 📊 Ops HQ)
+
+First time only: in n8n (http://localhost:5679) open workflow **01**, then **02**, and click *Execute workflow* to fill the
+knowledge base. Step-by-step detail with what you should see each time: [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+
+### Other ways to run it
 
 | Option | Command | Details |
 |---|---|---|
